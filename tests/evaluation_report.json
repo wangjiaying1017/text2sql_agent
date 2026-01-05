@@ -1,0 +1,317 @@
+[
+  {
+    "question": "帮我查一下所有客户的名称和联系电话",
+    "sql": "SELECT\n  name,\n  phone\nFROM t_client;",
+    "tables": [
+      "t_client"
+    ],
+    "evaluation": {
+      "syntax_score": 10,
+      "semantic_score": 9,
+      "overall_score": 9,
+      "is_correct": true,
+      "comments": "SQL语法正确，可在MySQL执行；字段name与phone在t_client表中存在，能返回客户名称和联系电话。若“联系电话”也可能指mobile，则当前查询可能不完整。",
+      "suggestions": [
+        "确认“联系电话”口径：如需包含手机号码，可改为同时查询phone与mobile，或用COALESCE(phone, mobile)统一输出。",
+        "如只需有效客户，可增加过滤条件（例如 WHERE status = 1）以排除停用/无效记录。"
+      ]
+    },
+    "error": null
+  },
+  {
+    "question": "有哪些客户的余额超过1000？",
+    "sql": "SELECT\n  id,\n  auto_id,\n  name,\n  balance,\n  status,\n  create_time\nFROM t_client\nWHERE balance > 1000\nORDER BY balance DESC;",
+    "tables": [
+      "t_client"
+    ],
+    "evaluation": {
+      "syntax_score": 10,
+      "semantic_score": 9,
+      "overall_score": 9,
+      "is_correct": true,
+      "comments": "SQL语法正确，可在MySQL执行；能准确筛选t_client中balance>1000的客户并按余额降序。返回字段略多于问题所需。",
+      "suggestions": [
+        "若仅回答“哪些客户”，可只返回必要字段（如 id、name、balance）以减少数据传输与噪音",
+        "如需排除无效/停用客户，可根据业务补充状态过滤（例如 WHERE status=1 AND balance>1000）"
+      ]
+    },
+    "error": null
+  },
+  {
+    "question": "列出所有状态正常的客户",
+    "sql": "SELECT\n  id,\n  auto_id,\n  name,\n  phone,\n  status,\n  balance,\n  create_time,\n  last_login_time,\n  last_login_ip\nFROM t_client\nWHERE status = 1;",
+    "tables": [
+      "t_client"
+    ],
+    "evaluation": {
+      "syntax_score": 10,
+      "semantic_score": 9,
+      "overall_score": 9,
+      "is_correct": true,
+      "comments": "SQL语法正确，表/字段均存在；通过 status=1 筛选“状态正常”基本符合DDL默认含义，但“正常”的具体枚举含义未在DDL中明确说明，存在轻微语义不确定性。",
+      "suggestions": [
+        "确认 status 字段取值含义（例如 1 是否代表正常、0/2 是否代表禁用/删除），必要时调整 WHERE 条件以匹配业务定义。",
+        "如果仅需“列出客户”，可按需求精简 SELECT 字段（如仅返回 id、name、phone、status），避免返回不必要的敏感/冗余信息。"
+      ]
+    },
+    "error": null
+  },
+  {
+    "question": "查一下最近一周注册的新客户",
+    "sql": "SELECT\n  auto_id,\n  id,\n  customer_id,\n  name,\n  phone,\n  mobile,\n  status,\n  balance,\n  create_time\nFROM t_client\nWHERE create_time >= UNIX_TIMESTAMP(DATE_SUB(NOW(), INTERVAL 7 DAY)) * 1000\nORDER BY create_time DESC;",
+    "tables": [
+      "t_client"
+    ],
+    "evaluation": {
+      "syntax_score": 10,
+      "semantic_score": 8,
+      "overall_score": 9,
+      "is_correct": true,
+      "comments": "SQL语法正确，表/字段均存在；用create_time筛选最近7天创建的客户基本符合“最近一周注册的新客户”的语义，但create_time是否为毫秒时间戳需确认。",
+      "suggestions": [
+        "确认create_time的单位：如果存的是秒级时间戳，应去掉“* 1000”；如果是毫秒级则当前写法正确。",
+        "建议加上上界以避免未来时间数据：create_time >= ... AND create_time < UNIX_TIMESTAMP(NOW())*1000，并明确“最近一周”是否包含当天/是否按自然周统计。"
+      ]
+    },
+    "error": null
+  },
+  {
+    "question": "当前有多少台已激活设备？",
+    "sql": "SELECT COUNT(*) AS activated_device_count\nFROM t_edge\nWHERE status = 1;",
+    "tables": [
+      "t_edge"
+    ],
+    "evaluation": {
+      "syntax_score": 10,
+      "semantic_score": 10,
+      "overall_score": 10,
+      "is_correct": true,
+      "comments": "SQL语法正确；依据DDL中status字段定义(1=已激活)统计已激活设备数量，语义匹配问题“当前有多少台已激活设备”。",
+      "suggestions": [
+        "如需限定某公司已激活设备数，可增加条件：AND client_id = ?",
+        "若业务上“已激活”还要求serial或active_time非空，可补充约束：AND active_time IS NOT NULL（或 AND serial IS NOT NULL）以贴合更严格口径"
+      ]
+    },
+    "error": null
+  },
+  {
+    "question": "哪些设备处于未激活状态？",
+    "sql": "SELECT\n  id,\n  name,\n  serial,\n  status,\n  running,\n  country,\n  city,\n  code,\n  mac,\n  version,\n  client_id,\n  public_ip,\n  apply_id,\n  active_time,\n  on_off_time\nFROM t_edge\nWHERE status = 0;",
+    "tables": [
+      "t_edge"
+    ],
+    "evaluation": {
+      "syntax_score": 10,
+      "semantic_score": 10,
+      "overall_score": 10,
+      "is_correct": true,
+      "comments": "SQL语法正确，且依据DDL中status=0表示未激活，能够准确筛选未激活设备并返回设备信息字段。",
+      "suggestions": [
+        "如仅需回答“哪些设备未激活”，可只选择必要字段（如id、name、serial、status）以减少数据读取与传输开销。",
+        "可显式标注状态含义或使用别名增强可读性（例如将status映射为'未激活'），便于结果理解。"
+      ]
+    },
+    "error": null
+  },
+  {
+    "question": "列出所有在北京的设备",
+    "sql": "SELECT\n  e.*\nFROM t_edge AS e\nLEFT JOIN t_edge_apply AS a ON a.id = e.apply_id\nWHERE\n  e.city IN ('北京','北京市')\n  OR a.city IN ('北京','北京市');",
+    "tables": [
+      "t_edge_apply",
+      "t_edge"
+    ],
+    "evaluation": {
+      "syntax_score": 10,
+      "semantic_score": 9,
+      "overall_score": 9,
+      "is_correct": true,
+      "comments": "SQL语法正确；能通过t_edge.city或关联的t_edge_apply.city筛选出“北京/北京市”的设备，基本符合“列出所有在北京的设备”的需求。",
+      "suggestions": [
+        "由于t_edge.apply_id为NOT NULL且通常应与t_edge_apply一对一，若确认不存在孤儿数据可将LEFT JOIN改为INNER JOIN以减少歧义并可能提升性能。",
+        "可用COALESCE(e.city, a.city)统一城市来源，避免OR条件影响索引使用：WHERE COALESCE(e.city, a.city) IN ('北京','北京市')。",
+        "如存在城市字段包含空格/别名（如“北京 ”、“北京市海淀区”）的情况，可考虑使用TRIM或LIKE/前缀匹配策略以提高召回率。"
+      ]
+    },
+    "error": null
+  },
+  {
+    "question": "查一下版本号是2.0开头的设备",
+    "sql": "SELECT\n  id,\n  serial,\n  module_id,\n  current_version,\n  update_time,\n  create_time\nFROM t_device_version\nWHERE current_version LIKE '2.0%';",
+    "tables": [
+      "t_device_version"
+    ],
+    "evaluation": {
+      "syntax_score": 10,
+      "semantic_score": 10,
+      "overall_score": 10,
+      "is_correct": true,
+      "comments": "SQL语法正确，使用LIKE '2.0%'能准确筛选出current_version以2.0开头的设备版本记录，字段与表结构匹配。",
+      "suggestions": [
+        "如版本号可能包含前后空格，可考虑使用TRIM(current_version) LIKE '2.0%'提高容错性",
+        "若数据量大且查询频繁，可考虑为current_version增加合适索引（或前缀索引）以提升LIKE前缀匹配性能"
+      ]
+    },
+    "error": null
+  },
+  {
+    "question": "统计各个国家的客户数量",
+    "sql": "SELECT\n  country_id,\n  COUNT(*) AS client_count\nFROM t_client\nGROUP BY country_id\nORDER BY client_count DESC;",
+    "tables": [
+      "t_client"
+    ],
+    "evaluation": {
+      "syntax_score": 10,
+      "semantic_score": 9,
+      "overall_score": 9,
+      "is_correct": true,
+      "comments": "SQL语法正确，可在MySQL执行；能按country_id统计客户数量并按数量排序。若问题期望“国家名称”而非ID，需关联国家维表；同时需明确是否排除country_id为NULL或按客户唯一标识去重。",
+      "suggestions": [
+        "若需要展示国家名称/代码，请JOIN国家维表（如t_country）并按国家名称分组或在SELECT中返回名称字段。",
+        "如需排除未知国家，增加WHERE country_id IS NOT NULL；如需按客户唯一ID计数，改为COUNT(DISTINCT id)或COUNT(DISTINCT customer_id)以避免潜在重复。"
+      ]
+    },
+    "error": null
+  },
+  {
+    "question": "每种客户类型有多少个客户？",
+    "sql": "SELECT\n  ct.id AS client_type_id,\n  ct.zh_name AS client_type_zh_name,\n  ct.name AS client_type_name,\n  COUNT(c.auto_id) AS client_count\nFROM t_client_type ct\nLEFT JOIN t_client c\n  ON c.client_type_id = ct.id\nGROUP BY ct.id, ct.zh_name, ct.name\nORDER BY client_count DESC;",
+    "tables": [
+      "t_client_type",
+      "t_client"
+    ],
+    "evaluation": {
+      "syntax_score": 10,
+      "semantic_score": 9,
+      "overall_score": 9,
+      "is_correct": true,
+      "comments": "SQL语法正确，可在MySQL执行；使用LEFT JOIN能统计每种客户类型下的客户数量，并包含没有客户的类型。字段与表结构匹配，COUNT(auto_id)作为主键计数合理。",
+      "suggestions": [
+        "若业务只关心已有客户的类型，可将 LEFT JOIN 改为 INNER JOIN 以排除 client_count=0 的类型。",
+        "如需按客户状态统计（例如仅统计启用 status=1 的客户），可在 JOIN 条件中增加过滤：ON c.client_type_id=ct.id AND c.status=1。"
+      ]
+    },
+    "error": null
+  },
+  {
+    "question": "帮我查一下每个客户有多少台设备",
+    "sql": "SELECT\n  client_id,\n  COUNT(*) AS device_count\nFROM t_edge_apply\nGROUP BY client_id;",
+    "tables": [
+      "t_edge_apply"
+    ],
+    "evaluation": {
+      "syntax_score": 10,
+      "semantic_score": 7,
+      "overall_score": 8,
+      "is_correct": true,
+      "comments": "SQL语法正确，能统计每个client_id在t_edge_apply中的记录数；但t_edge_apply更像“设备申请/交付信息表”，COUNT(*)统计的是记录数，不一定等同于“设备台数”（可能存在一台设备多条记录、或未交付/已退回等情况）。",
+      "suggestions": [
+        "确认“一台设备”的唯一标识字段（如device_sn/edge_id等）；若存在应改为COUNT(DISTINCT 设备唯一标识)避免重复计数。",
+        "如仅统计有效/已交付设备，建议按业务口径增加过滤条件（例如delivery_status=3商用，或排除退回状态等）。"
+      ]
+    },
+    "error": null
+  },
+  {
+    "question": "哪些客户没有任何设备？",
+    "sql": "SELECT DISTINCT ca.client_id\nFROM t_client_account AS ca\nLEFT JOIN t_edge_apply AS ea\n  ON ea.client_id = ca.client_id\nWHERE ca.disabled = b'0'\n  AND ea.id IS NULL;",
+    "tables": [
+      "t_edge_apply",
+      "t_client_account"
+    ],
+    "evaluation": {
+      "syntax_score": 9,
+      "semantic_score": 7,
+      "overall_score": 8,
+      "is_correct": false,
+      "comments": "语法在MySQL下基本可执行，LEFT JOIN + ea.id IS NULL 能找出在 t_edge_apply 中无记录的 client_id。但“客户”来源使用 t_client_account 可能不完整（仅覆盖有账号的客户），且是否需要过滤禁用/删除账号与“没有设备”无直接必然关系。",
+      "suggestions": [
+        "如果存在客户主表（如 t_client / t_customer），应以客户主表为驱动表再判断设备表不存在记录，避免遗漏“没有账号但有客户实体”的情况。",
+        "可改用 NOT EXISTS 语义更清晰且避免因账号表一客户多账号造成的重复扫描：SELECT ca.client_id FROM t_client_account ca WHERE ca.disabled=b'0' AND NOT EXISTS (SELECT 1 FROM t_edge_apply ea WHERE ea.client_id=ca.client_id)。",
+        "确认业务口径：是否需要排除已删除/禁用客户（当前仅过滤 disabled，未过滤 status），以及“设备”是否应以 t_edge_apply 作为唯一设备来源（该表更像设备申请/交付信息）。"
+      ]
+    },
+    "error": null
+  },
+  {
+    "question": "找出设备数量超过10台的客户",
+    "sql": "SELECT\n  c.auto_id,\n  c.id,\n  c.name,\n  COUNT(*) AS device_count\nFROM t_client AS c\nJOIN t_device_trace AS dt\n  ON dt.type = 1\n AND dt.client_id = c.auto_id\nGROUP BY c.auto_id, c.id, c.name\nHAVING COUNT(*) > 10;",
+    "tables": [
+      "t_client",
+      "t_device_trace"
+    ],
+    "evaluation": {
+      "syntax_score": 10,
+      "semantic_score": 7,
+      "overall_score": 8,
+      "is_correct": false,
+      "comments": "SQL语法在MySQL中可正常执行；但用COUNT(*)统计t_device_trace行数可能不等同于“设备数量”（trace表可能对同一设备有多条记录），存在过度计数风险。",
+      "suggestions": [
+        "如果“设备数量”指设备序列号数量，建议改为 COUNT(DISTINCT dt.serial) 来避免同一设备多条trace记录导致的重复计数。",
+        "如业务口径仅统计在用设备，可在条件中补充 dt.status = 1（或按需求限定其他状态/时间范围）。"
+      ]
+    },
+    "error": null
+  },
+  {
+    "question": "列出没有账号的客户",
+    "sql": "SELECT\n  c.*\nFROM t_client AS c\nLEFT JOIN t_client_account AS a\n  ON a.client_id = c.id\n  AND a.disabled = b'0'\nWHERE a.id IS NULL;",
+    "tables": [
+      "t_client",
+      "t_client_account"
+    ],
+    "evaluation": {
+      "syntax_score": 10,
+      "semantic_score": 7,
+      "overall_score": 8,
+      "is_correct": false,
+      "comments": "SQL语法在MySQL下可执行；但语义上把 a.disabled=b'0' 写在JOIN条件里，会把“只有已删除(disabled=1)账号的客户”也当作“没有账号”返回，可能不符合“没有账号(任何账号都没有)”的直观含义。",
+      "suggestions": [
+        "若需求是“完全没有任何账号记录”，请去掉JOIN条件中的 a.disabled=b'0'，仅用 LEFT JOIN t_client_account a ON a.client_id=c.id，再用 WHERE a.id IS NULL 过滤。",
+        "若需求其实是“没有未删除/有效账号”，请在评价或SQL中明确口径（例如同时考虑 status=1、disabled=0、有效期等），避免歧义。"
+      ]
+    },
+    "error": null
+  },
+  {
+    "question": "查看海底捞这个客户的所有设备信息",
+    "sql": "SELECT\n  c.id AS client_uuid,\n  c.auto_id AS client_auto_id,\n  c.name AS client_name,\n  c.phone,\n  c.contact,\n  c.mobile,\n  c.status AS client_status,\n  c.balance,\n  c.create_time AS client_create_time,\n  e.id AS edge_id,\n  e.name AS edge_name,\n  e.serial AS edge_serial,\n  e.status AS edge_status,\n  e.running AS edge_running,\n  e.country,\n  e.city,\n  ST_AsText(e.location) AS location,\n  e.code,\n  e.description,\n  e.mac,\n  e.version,\n  e.public_ip,\n  e.apply_id,\n  e.active_time,\n  e.on_off_time,\n  dt.id AS trace_id,\n  dt.type AS trace_type,\n  dt.client_id AS trace_client_auto_id,\n  dt.cooperation_id,\n  dt.final_client_id,\n  dt.mirror_type,\n  dt.display_type,\n  dt.status AS trace_status,\n  dt.shipment_id,\n  dt.shipment_date,\n  dt.imei,\n  dt.device_type,\n  dt.create_time AS trace_create_time\nFROM t_client c\nLEFT JOIN t_edge e\n  ON e.client_id = c.id\nLEFT JOIN t_device_trace dt\n  ON dt.serial = e.serial\nWHERE c.name = '海底捞'\nORDER BY e.id, dt.id;",
+    "tables": [
+      "t_edge",
+      "t_client",
+      "t_device_trace"
+    ],
+    "evaluation": {
+      "syntax_score": 9,
+      "semantic_score": 7,
+      "overall_score": 8,
+      "is_correct": true,
+      "comments": "SQL在MySQL语法层面基本可执行，能按客户名称关联到t_edge并展示设备信息；但t_device_trace的关联仅按serial，未限定该追溯记录一定属于该客户，可能混入不相关的追溯数据或产生多条历史记录导致结果膨胀。",
+      "suggestions": [
+        "在关联t_device_trace时增加约束条件，避免串数据：例如加上 dt.type = 1 AND dt.client_id = c.auto_id（或按业务选择final_client_id等正确字段）以及 dt.device_type = 'EDGE'。",
+        "如仅需“设备信息”，可移除t_device_trace或改为子查询/窗口函数取每个serial最新的一条追溯记录（按create_time或id排序），避免一台设备多条追溯导致重复行。",
+        "客户名称可能不唯一或存在别名，建议改为按c.id/c.auto_id精确查询，或使用LIKE并确认唯一性；必要时对c.name做大小写/空格规范化匹配。"
+      ]
+    },
+    "error": null
+  },
+  {
+    "question": "列出各个客户的联系人信息及其设备数量",
+    "sql": "SELECT\n  c.id AS client_id,\n  c.name AS client_name,\n  cc.contact AS contact_name,\n  cc.phone AS contact_phone,\n  cc.mobile AS contact_mobile,\n  cc.appellation AS contact_appellation,\n  cc.area AS contact_area,\n  c.m100_number AS device_count\nFROM t_client AS c\nLEFT JOIN t_client_contact AS cc\n  ON cc.client_id = c.id\nORDER BY c.auto_id, cc.id;",
+    "tables": [
+      "t_client",
+      "t_client_contact"
+    ],
+    "evaluation": {
+      "syntax_score": 10,
+      "semantic_score": 7,
+      "overall_score": 8,
+      "is_correct": false,
+      "comments": "SQL语法正确，表关联字段也匹配DDL；但“设备数量”直接取用t_client.m100_number（账号数量）未必等同于设备数量，且一客户多联系人会导致同一设备数量在结果中重复出现，可能不符合“各个客户”的汇总口径。",
+      "suggestions": [
+        "确认“设备数量”的真实来源：若设备来自设备表需COUNT关联；若确实用m100_number代表设备数量，请在字段别名/注释中明确含义（如m100_account_count）。",
+        "若期望每个客户仅一行（汇总级别），需对联系人做聚合/选取主联系人（例如MIN/MAX或按创建时间取最新），避免一客户多联系人导致重复行。"
+      ]
+    },
+    "error": null
+  }
+]
