@@ -261,8 +261,7 @@ class HybridRetriever:
                 scores[doc_id] += 1 / (k + rank + 1)
                 doc_data[doc_id] = doc  # Qdrant 数据优先
         
-        # 再处理关键词检索结果（ES 数据补充）
-        es_only_tables = []  # 记录只在 ES 中找到的表
+        # 再处理关键词检索结果（ES 数据补充，现在 ES 也包含 structured_description）
         for rank, doc in enumerate(keyword_results):
             doc_id = doc.get("table_name", "")
             if doc_id:
@@ -270,19 +269,6 @@ class HybridRetriever:
                 if doc_id not in doc_data:
                     # 只有 Qdrant 没有的表才用 ES 数据
                     doc_data[doc_id] = doc
-                    es_only_tables.append(doc_id)
-        
-        # 对只来自 ES 的表，从 Qdrant 批量补充 structured_description
-        if es_only_tables:
-            try:
-                # 批量获取表信息（一次查询）
-                qdrant_docs = self._get_tables_by_names(es_only_tables)
-                for table_name, qdrant_doc in qdrant_docs.items():
-                    if qdrant_doc and qdrant_doc.get("structured_description"):
-                        doc_data[table_name]["structured_description"] = qdrant_doc["structured_description"]
-                        doc_data[table_name]["relationships"] = qdrant_doc.get("relationships", [])
-            except Exception:
-                pass  # 忽略查询失败
         
         # 按RRF分数排序
         sorted_ids = sorted(scores.items(), key=lambda x: -x[1])[:top_k]

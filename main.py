@@ -57,7 +57,6 @@ def main():
         use_keyword_search=not args.no_keyword_search,
         rag_top_k=args.top_k
     )
-    session_memory = SessionMemory(window_size=3)
     
     while True:
         try:
@@ -74,22 +73,11 @@ def main():
             
             # 运行编排器
             console.print()
-            result = orchestrator.run(question, verbose=True, session_memory=session_memory)
-            
-            # 处理澄清请求
-            if result.get("status") == "needs_clarification":
-                # 保存当前交互到会话记忆
-                clarification_msg = "需要您补充信息: " + ", ".join(result.get("clarification_questions", []))
-                session_memory.add_exchange(question, clarification_msg)
-                console.print("\n[dim]请回答上述问题后继续提问...[/dim]")
-                continue
+            result = orchestrator.run(question, verbose=True)
             
             # 检查错误
             if result.get("error"):
                 console.print(f"[red]执行出错: {result['error']}[/red]")
-            
-            # 成功执行后清空会话记忆
-            session_memory.clear()
             
         except KeyboardInterrupt:
             console.print("\n[yellow]程序已中断[/yellow]")

@@ -21,19 +21,7 @@ class QueryStep(BaseModel):
 
 
 class QueryPlan(BaseModel):
-    """LLM生成的查询计划。"""
-    analysis: str = Field(description="对用户问题的分析")
-    strategy: str = Field(description="查询策略描述")
-    
-    # 置信度评估
-    confidence: float = Field(ge=0, le=1, description="对问题理解的置信度(0-1)")
-    assumptions: list[str] = Field(default_factory=list, description="LLM做的假设")
-    
-    # 澄清机制
-    needs_clarification: bool = Field(default=False, description="是否需要用户澄清")
-    clarification_questions: list[str] = Field(default_factory=list, description="需要用户回答的澄清问题")
-    
-    # 执行步骤
+    """查询计划。"""
     steps: list[QueryStep] = Field(description="执行步骤")
 
 
@@ -202,13 +190,13 @@ class IntentRecognizer:
         # 1. 并行执行 MySQL 和 InfluxDB 的 RAG 检索
         with ThreadPoolExecutor(max_workers=2) as executor:
             mysql_future = executor.submit(self._retrieve_relevant_tables, question, "mysql")
-            influxdb_future = executor.submit(self._retrieve_relevant_tables, question, "influxdb")
+            #influxdb_future = executor.submit(self._retrieve_relevant_tables, question, "influxdb")
             
             relevant_tables = mysql_future.result()
-            relevant_measurements = influxdb_future.result()
+            #relevant_measurements = influxdb_future.result()
         
         mysql_tables_info = self._format_table_info(relevant_tables)
-        influxdb_info = self._format_influxdb_info(relevant_measurements)
+        #influxdb_info = self._format_influxdb_info(relevant_measurements)
         
         # 3. 创建处理链（使用结构化输出，无需额外解析器）
         chain = self.prompt | self.llm
@@ -217,7 +205,7 @@ class IntentRecognizer:
             "question": question,
             "context": context if context else "无历史上下文",
             "mysql_relevant_tables": mysql_tables_info,
-            "influxdb_relevant_measurements": influxdb_info,
+            #"influxdb_relevant_measurements": influxdb_info,
         }
         
         # 打印完整 prompt（用于调试）

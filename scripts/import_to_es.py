@@ -3,9 +3,14 @@ Elasticsearch Schema Store
 
 将MySQL表结构信息存储到Elasticsearch，用于关键词检索。
 """
+import sys
+from pathlib import Path
+
+# 添加项目根目录到 sys.path，使脚本可以从任意目录运行
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 import json
 from typing import Any, Optional
-from pathlib import Path
 from elasticsearch import Elasticsearch
 
 from config import settings
@@ -22,6 +27,8 @@ ES_MAPPING = {
         "column_names_str": {"type": "text", "analyzer": "ik_max_word"},
         "column_comments_str": {"type": "text", "analyzer": "ik_max_word"},
         "full_ddl": {"type": "keyword"},  # 原始DDL，不分词
+        "structured_description": {"type": "text"},  # 结构化描述，包含 Join Hints
+        "relationships": {"type": "object", "enabled": False},  # 关系信息，不索引
         "columns": {"type": "object", "enabled": False},  # 不索引columns对象
     }
 }
@@ -212,16 +219,24 @@ def import_from_json(json_file: str, delete_existing: bool = False) -> None:
         json_file: JSON文件路径
         delete_existing: 是否删除已存在的索引
     """
+    # 导入 build_structured_description 函数
+    from scripts.import_to_qdrant import build_structured_description
+    
     with open(json_file, "r", encoding="utf-8") as f:
         schemas = json.load(f)
     
     if not isinstance(schemas, list):
         schemas = [schemas]
     
+    # 为每个 schema 添加 structured_description
+    for schema in schemas:
+        if "structured_description" not in schema or not schema["structured_description"]:
+            schema["structured_description"] = build_structured_description(schema)
+    
     store = ElasticsearchStore()
     store.create_index(delete_existing=delete_existing)
     
-    print(f"📥 导入 {len(schemas)} 个表结构到ES...")
+    print(f"📥 导入 {len(schemas)} 个表结构到ES（包含 structured_description）...")
     count = store.bulk_index(schemas)
     print(f"✅ 成功导入 {count} 个表结构")
 

@@ -69,7 +69,7 @@ class Text2SQLOrchestrator:
                 )
             return self._influxdb_retriever
     
-    def run(self, question: str, verbose: bool = True, session_memory=None) -> dict[str, Any]:
+    def run(self, question: str, verbose: bool = True, session_memory=None, skip_clarification: bool = False) -> dict[str, Any]:
         """
         运行完整的Text2SQL工作流。
         
@@ -77,6 +77,7 @@ class Text2SQLOrchestrator:
             question: 用户自然语言问题
             verbose: 是否打印详细输出
             session_memory: 会话记忆（用于澄清场景）
+            skip_clarification: 跳过澄清检查，强制执行
             
         Returns:
             最终结果字典
@@ -85,17 +86,12 @@ class Text2SQLOrchestrator:
         
         results = {
             "question": question,
-            "status": "success",  # success, needs_clarification, error
+            "status": "success",  # success, error
             "plan": None,
             "steps_results": [],
             "final_result": None,
             "error": None,
             "timing": {},
-            # A+C组合相关
-            "confidence": None,
-            "assumptions": [],
-            "warning": None,
-            "clarification_questions": [],
         }
         
         total_start = time.time()
@@ -105,49 +101,24 @@ class Text2SQLOrchestrator:
             if verbose:
                 console.print(Panel("🔍 意图识别中...", title="步骤 1"))
             
-            # 获取对话上下文
-            context = session_memory.get_history() if session_memory else ""
-            
             intent_start = time.time()
-            plan = self.intent_recognizer.recognize(question, context=context, verbose=verbose)
+            plan = self.intent_recognizer.recognize(question, verbose=verbose)
             intent_time = time.time() - intent_start
             results["timing"]["intent_recognition"] = round(intent_time, 2)
             
             results["plan"] = plan.model_dump()
-            results["confidence"] = plan.confidence
-            results["assumptions"] = plan.assumptions
             
             if verbose:
                 console.print(f"[dim]⏱️  意图识别耗时: {intent_time:.2f}s[/dim]")
-                console.print(f"[dim]📊 置信度: {plan.confidence:.2f}[/dim]")
             
-            # A+C组合决策逻辑
-            if plan.confidence < 0.5 or plan.needs_clarification:
-                # 低置信度，需要澄清
-                results["status"] = "needs_clarification"
-                results["clarification_questions"] = plan.clarification_questions
-                
+            # 如果没有生成执行计划，返回错误（不再请求澄清）
+            if len(plan.steps) == 0:
+                results["status"] = "error"
+                results["error"] = "无法生成查询计划，请尝试更明确地描述您的需求"
                 if verbose:
-                    console.print("[yellow]⚠️ 问题不够明确，需要用户补充信息[/yellow]")
-                    for q in plan.clarification_questions:
-                        console.print(f"[yellow]  ❓ {q}[/yellow]")
-                
-                # 记录总耗时
+                    console.print("[red]❌ 无法生成查询计划[/red]")
                 results["timing"]["total"] = round(time.time() - total_start, 2)
                 return results
-            
-            elif plan.confidence < 0.8:
-                # 中等置信度，执行但警告
-                results["warning"] = "置信度较低，结果可能不够准确"
-                if verbose:
-                    console.print("[yellow]⚠️ 置信度较低，结果可能不够准确[/yellow]")
-                    if plan.assumptions:
-                        console.print(f"[dim]系统假设: {', '.join(plan.assumptions)}[/dim]")
-            
-            else:
-                # 高置信度，展示假设
-                if verbose and plan.assumptions:
-                    console.print(f"[dim]系统假设: {', '.join(plan.assumptions)}[/dim]")
             
             if verbose:
                 self._print_plan(plan)
@@ -196,6 +167,7 @@ class Text2SQLOrchestrator:
                     database_type=step.database,
                     schema=schema,
                     context=step_context,
+                    verbose=verbose,
                 )
                 gen_time = time.time() - gen_start
                 step_timing["sql_generation"] = round(gen_time, 2)
@@ -350,10 +322,11 @@ class Text2SQLOrchestrator:
             table_names = [r["table_name"] for r in results]
             console.print(f"[green]🔀 RRF融合结果 ({len(results)}个): {', '.join(table_names)}[/green]")
         
-        # 构建DDL字符串
+        # 构建DDL字符串（优先使用 structured_description，包含 Join Hints）
         ddl_parts = []
         for r in results:
-            ddl = r.get("full_ddl", "")
+            # 优先使用 structured_description（更简洁，包含 Join Hints）
+            ddl = r.get("structured_description", "") or r.get("full_ddl", "")
             if ddl:
                 ddl_parts.append(f"-- 表: {r['table_name']}\n{ddl}")
         
@@ -400,9 +373,6 @@ class Text2SQLOrchestrator:
     
     def _print_plan(self, plan: QueryPlan) -> None:
         """打印查询计划。"""
-        console.print(f"\n[green]分析:[/green] {plan.analysis}")
-        console.print(f"[green]策略:[/green] {plan.strategy}")
-        console.print(f"[green]置信度:[/green] {plan.confidence:.2%}")
         
         table = Table(title="执行计划")
         table.add_column("步骤", style="cyan")

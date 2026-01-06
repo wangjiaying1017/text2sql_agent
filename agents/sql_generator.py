@@ -9,7 +9,7 @@ from langchain_core.output_parsers import StrOutputParser
 
 from config.settings import settings
 from llm.client import create_model
-SQL_GENERATION_PROMPT = """你是一个SQL专家。根据用户问题和数据库schema，生成合适的查询语句。
+SQL_GENERATION_PROMPT = """你是一个SQL专家。根据用户问题和数据库schema，生成准确的查询语句。
 
 ## 目标数据库
 {database_type}
@@ -70,14 +70,14 @@ Relationships:
 {context}
 
 ## 要求
-1. 只输出SQL/Flux查询语句，不要解释
+1. 只输出SQL查询语句，不要解释
 2. 确保语法正确
 3. 如果有上下文信息，请在查询中使用
 4. 只能使用schema中明确给出的表和字段
 5. 观察上下文中schema信息，理解表与表之间的关联关系
 6. 保证生成的sql语句能够高效运行
 7. 当用户使用设备名称或客户名称查询时，必须通过 t_edge 或 t_client 表进行 JOIN 关联
-
+8. ***如果某条件未被明确指定***，则不要出现在 WHERE 子句中
 请生成查询语句："""
 
 
@@ -89,7 +89,7 @@ class SQLGenerator:
     """
     
     def __init__(self):
-        self.llm = create_model(model_name=settings.llm_model,reasoning_effort="medium",temperature=0.0)
+        self.llm = create_model(model_name=settings.llm_model,temperature=0.0)
         self.prompt = ChatPromptTemplate.from_template(SQL_GENERATION_PROMPT)
         self.parser = StrOutputParser()
     
