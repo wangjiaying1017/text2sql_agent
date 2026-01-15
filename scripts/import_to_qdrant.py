@@ -2,7 +2,7 @@
 Qdrant Vector Store for MySQL Schema
 
 将MySQL表结构信息存储到Qdrant向量数据库，用于语义检索。
-使用OpenAI text-embedding-3-small模型进行embedding。
+使用阿里云DashScope text-embedding-v4模型进行embedding。
 """
 import json
 import re
@@ -18,14 +18,17 @@ from qdrant_client.models import Distance, VectorParams, PointStruct
 from openai import OpenAI
 
 from config import settings
+import logging
+
+logger = logging.getLogger("text2sql.qdrant")
 
 
 # Qdrant集合名称
 QDRANT_COLLECTION_NAME = "mysql_table_schema"
 
-# OpenAI Embedding模型
-EMBEDDING_MODEL = "text-embedding-3-small"
-EMBEDDING_DIM = 1536  # text-embedding-3-small 的向量维度
+# DashScope Embedding模型
+EMBEDDING_MODEL = "text-embedding-v4"
+EMBEDDING_DIM = 1536  # text-embedding-v4 支持多维度，使用1536保持兼容
 
 # 外键注释模式: (关联t_xxx.yyy字段)
 FK_COMMENT_PATTERN = re.compile(r'\(关联\s*(t_\w+)\.(\w+)\s*字段?\)')
@@ -178,7 +181,14 @@ def build_structured_description(schema: dict) -> str:
 class QdrantStore:
     """
     Qdrant向量存储类，用于MySQL表结构的语义检索。
+    
+    使用类变量共享 QdrantClient 和 OpenAI 客户端，避免重复连接。
     """
+    
+    # 共享的客户端实例（类变量）
+    _shared_client: Optional[QdrantClient] = None
+    _shared_openai: Optional[OpenAI] = None
+    _warmed_up: bool = False
     
     def __init__(
         self,
@@ -188,7 +198,9 @@ class QdrantStore:
         embedding_model: str = EMBEDDING_MODEL,
     ):
         """
-        初始化Qdrant连接和OpenAI客户端。
+        初始化Qdrant连接和DashScope客户端。
+        
+        复用共享的连接实例，只在首次创建时初始化。
         
         Args:
             host: Qdrant主机地址
@@ -202,17 +214,56 @@ class QdrantStore:
         self.embedding_model = embedding_model
         self._embedding_dim = EMBEDDING_DIM
         
-        # 连接Qdrant
-        print(f"🔗 连接Qdrant: {self.host}:{self.port}")
-        self._client = QdrantClient(host=self.host, port=self.port)
+        # 复用或创建共享的 Qdrant 客户端
+        if QdrantStore._shared_client is None:
+            logger.debug(f"[Qdrant] Connecting: {self.host}:{self.port}")
+            QdrantStore._shared_client = QdrantClient(host=self.host, port=self.port)
+        self._client = QdrantStore._shared_client
         
-        # 初始化OpenAI客户端
-        print(f"📥 使用OpenAI Embedding模型: {embedding_model}")
-        self._openai = OpenAI(
-            api_key=settings.llm_api_key,
-            base_url=settings.llm_base_url,
-        )
-        print(f"   向量维度: {self._embedding_dim}")
+        # 复用或创建共享的 OpenAI 客户端
+        if QdrantStore._shared_openai is None:
+            logger.debug(f"[Embedding] Model: {embedding_model}, dim: {self._embedding_dim}")
+            QdrantStore._shared_openai = OpenAI(
+                api_key=settings.qwen_api_key,
+                base_url=settings.qwen_base_url,
+            )
+        self._openai = QdrantStore._shared_openai
+    
+    def warmup(self) -> float:
+        """
+        预热 DashScope Embedding API 连接。
+        
+        通过发送一个简短的测试请求来完成：
+        - SSL/TLS 握手
+        - DNS 解析
+        - 连接池初始化
+        
+        如果已经预热过，直接返回 0。
+        
+        Returns:
+            预热耗时（秒）
+        """
+        # 如果已经预热过，跳过
+        if QdrantStore._warmed_up:
+            return 0.0
+        
+        import time
+        start = time.time()
+        try:
+            # 发送一个简短的测试请求
+            self._openai.embeddings.create(
+                model=self.embedding_model,
+                input="warmup",
+                dimensions=self._embedding_dim,
+            )
+            elapsed = time.time() - start
+            logger.debug(f"DashScope API warmup: {elapsed:.2f}s")
+            QdrantStore._warmed_up = True
+            return elapsed
+        except Exception as e:
+            elapsed = time.time() - start
+            logger.warning(f"DashScope API warmup failed: {e} ({elapsed:.2f}s)")
+            return elapsed
     
     def create_collection(self, delete_existing: bool = False) -> None:
         """
@@ -227,14 +278,14 @@ class QdrantStore:
         
         if exists:
             if delete_existing:
-                print(f"🗑️  删除已存在的集合: {self.collection_name}")
+                print(f"[Qdrant] Deleting existing collection: {self.collection_name}")
                 self._client.delete_collection(self.collection_name)
             else:
-                print(f"ℹ️  集合已存在: {self.collection_name}")
+                print(f"[Qdrant] Collection already exists: {self.collection_name}")
                 return
         
         # 创建集合
-        print(f"📦 创建集合: {self.collection_name}")
+        print(f"[Qdrant] Creating collection: {self.collection_name}")
         self._client.create_collection(
             collection_name=self.collection_name,
             vectors_config=VectorParams(
@@ -263,7 +314,7 @@ class QdrantStore:
     
     def _get_embedding(self, text: str) -> list[float]:
         """
-        调用OpenAI API生成单个文本的embedding。
+        调用DashScope API生成单个文本的embedding。
         
         Args:
             text: 输入文本
@@ -271,15 +322,24 @@ class QdrantStore:
         Returns:
             embedding向量
         """
+        import time
+        
         if not text.strip():
             # 空文本返回零向量
             return [0.0] * self._embedding_dim
         
+        start = time.time()
         response = self._openai.embeddings.create(
             model=self.embedding_model,
             input=text,
+            dimensions=self._embedding_dim,  # DashScope 支持自定义维度
         )
-        return response.data[0].embedding
+        elapsed = time.time() - start
+        # Removed verbose timing log
+        
+        embedding = response.data[0].embedding
+        
+        return embedding
     
     def _get_embeddings_batch(self, texts: list[str]) -> list[list[float]]:
         """
@@ -303,8 +363,8 @@ class QdrantStore:
         embeddings = [[0.0] * self._embedding_dim] * len(texts)
         
         if non_empty_texts:
-            # OpenAI API 每次最多2048个输入
-            batch_size = 100
+            # DashScope API 每次最多10个输入
+            batch_size = 10
             for start in range(0, len(non_empty_texts), batch_size):
                 end = min(start + batch_size, len(non_empty_texts))
                 batch_texts = non_empty_texts[start:end]
@@ -314,6 +374,7 @@ class QdrantStore:
                 response = self._openai.embeddings.create(
                     model=self.embedding_model,
                     input=batch_texts,
+                    dimensions=self._embedding_dim,  # DashScope 支持自定义维度
                 )
                 
                 for j, data in enumerate(response.data):
@@ -358,7 +419,7 @@ class QdrantStore:
         Returns:
             成功插入的数量
         """
-        print(f"📊 生成Embedding向量...")
+        print(f"[Embedding] Generating vectors...")
         
         # 为每个 schema 添加结构化描述
         texts = []
@@ -381,7 +442,7 @@ class QdrantStore:
         ]
         
         # 批量插入
-        print(f"📥 写入Qdrant...")
+        print(f"[Qdrant] Writing to Qdrant...")
         self._client.upsert(
             collection_name=self.collection_name,
             points=points,
@@ -404,8 +465,13 @@ class QdrantStore:
         Returns:
             匹配的表结构列表
         """
+        import time
+        
         # 生成查询向量
+        t0 = time.time()
         query_embedding = self._get_embedding(query)
+        t1 = time.time()
+        # Removed verbose timing log
         
         # 搜索（兼容新旧版本API）
         try:
@@ -422,6 +488,8 @@ class QdrantStore:
                 query_vector=query_embedding,
                 limit=limit,
             )
+        t2 = time.time()
+        # Removed verbose timing log
         
         # 提取结果
         return [

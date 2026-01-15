@@ -78,10 +78,32 @@ class InfluxDBConnector:
             
             # 将ResultSet转换为字典列表
             results = []
-            for series in result.get_points():
-                results.append(dict(series))
+            
+            # 检查返回类型
+            if result is None:
+                return []
+            
+            # 如果是 ResultSet 对象
+            if hasattr(result, 'get_points'):
+                for series in result.get_points():
+                    results.append(dict(series))
+            # 如果是列表（多个查询结果）
+            elif isinstance(result, list):
+                for item in result:
+                    if hasattr(item, 'get_points'):
+                        for series in item.get_points():
+                            results.append(dict(series))
+                    elif isinstance(item, dict):
+                        results.append(item)
+            # 如果是字典
+            elif isinstance(result, dict):
+                results.append(result)
+            else:
+                raise RuntimeError(f"未知的返回类型: {type(result)}, 值: {str(result)[:200]}")
             
             return results
+        except RuntimeError:
+            raise
         except Exception as e:
             raise RuntimeError(f"InfluxQL查询执行失败: {e}")
     

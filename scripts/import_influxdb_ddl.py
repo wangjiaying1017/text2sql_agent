@@ -4,8 +4,13 @@
 将influx_ddl_explanations.json中的InfluxDB measurement信息导入到ES和Qdrant，
 与MySQL表结构使用相同的存储格式。
 """
-import json
+import sys
 from pathlib import Path
+
+# 添加项目根目录到 sys.path，使脚本可以从任意目录运行
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+import json
 from typing import Any
 
 from scripts.import_to_es import ElasticsearchStore
@@ -47,6 +52,8 @@ def convert_to_schema_format(measurement: dict[str, Any]) -> dict[str, Any]:
     Returns:
         统一格式的schema字典
     """
+    import re
+    
     measurement_name = measurement.get("measurement_name", "")
     measurement_desc = measurement.get("measurement_description", "")
     
@@ -54,6 +61,8 @@ def convert_to_schema_format(measurement: dict[str, Any]) -> dict[str, Any]:
     columns = []
     column_names = []
     column_comments = []
+    tag_names = []
+    field_names = []
     
     # 处理tags
     tags = measurement.get("tags", {})
@@ -64,6 +73,7 @@ def convert_to_schema_format(measurement: dict[str, Any]) -> dict[str, Any]:
             "comment": tag_desc,
         })
         column_names.append(tag_name)
+        tag_names.append(tag_name)
         column_comments.append(tag_desc.split("。")[0] if tag_desc else "")  # 取第一句作为简短注释
     
     # 处理fields
@@ -84,6 +94,7 @@ def convert_to_schema_format(measurement: dict[str, Any]) -> dict[str, Any]:
             "comment": field_desc,
         })
         column_names.append(field_name)
+        field_names.append(field_name)
         column_comments.append(field_desc.split("。")[0] if field_desc else "")  # 取第一句
     
     # 构建DDL字符串（InfluxDB风格的Schema描述）
@@ -101,6 +112,43 @@ def convert_to_schema_format(measurement: dict[str, Any]) -> dict[str, Any]:
     
     full_ddl = "\n".join(ddl_parts)
     
+    # 提取关键词（从 measurement 名称和描述中提取）
+    keywords = []
+    
+    # 从 measurement_name 中提取英文词（按下划线分割）
+    name_parts = measurement_name.split("_")
+    keywords.extend(name_parts)
+    
+    # 从描述中提取中文关键词（简单分词：按常见分隔符分割）
+    desc_keywords = re.split(r'[，,。/、（）()]+', measurement_desc)
+    keywords.extend([k.strip() for k in desc_keywords if k.strip()])
+    
+    # 添加常见业务关键词映射
+    keyword_mapping = {
+        "wan": ["wan口", "广域网"],
+        "traffic": ["流量"],
+        "monitor": ["监控"],
+        "bandwidth": ["带宽"],
+        "edge": ["边缘", "边缘设备"],
+        "cpe": ["CPE", "客户端设备"],
+        "node": ["节点"],
+        "connectivity": ["连通性", "联通"],
+        "delay": ["时延", "延迟"],
+        "jitter": ["抖动"],
+        "drop": ["丢包"],
+        "session": ["会话"],
+        "rssi": ["信号强度"],
+        "business": ["业务"],
+    }
+    
+    for eng_word, cn_words in keyword_mapping.items():
+        if eng_word in measurement_name.lower():
+            keywords.extend(cn_words)
+    
+    # 去重并拼接
+    keywords = list(dict.fromkeys(keywords))  # 保持顺序去重
+    measurement_keywords = " ".join(keywords)
+    
     return {
         "table_name": measurement_name,  # 使用table_name保持一致
         "table_comment": measurement_desc,
@@ -108,6 +156,9 @@ def convert_to_schema_format(measurement: dict[str, Any]) -> dict[str, Any]:
         "columns": columns,
         "column_names_str": " ".join(column_names),
         "column_comments_str": " ".join(column_comments),
+        "tags_str": " ".join(tag_names),        # 新增：纯 tags 名称
+        "fields_str": " ".join(field_names),    # 新增：纯 fields 名称
+        "measurement_keywords": measurement_keywords,  # 新增：提取的关键词
         "full_ddl": full_ddl,
         # 保留原始结构
         "tags": tags,
@@ -137,10 +188,10 @@ def import_to_es(
     store.create_index(delete_existing=delete_existing)
     
     # 批量导入
-    print(f"📥 导入 {len(schemas)} 个measurement到ES...")
+    print(f"[ES] Importing {len(schemas)} measurements...")
     count = store.bulk_index(schemas)
     
-    print(f"✅ 成功导入 {count} 个measurement到ES")
+    print(f"[ES] Successfully imported {count} measurements")
     return count
 
 
@@ -166,10 +217,10 @@ def import_to_qdrant(
     store.create_collection(delete_existing=delete_existing)
     
     # 批量导入
-    print(f"📥 导入 {len(schemas)} 个measurement到Qdrant...")
+    print(f"[Qdrant] Importing {len(schemas)} measurements...")
     count = store.batch_upsert(schemas)
     
-    print(f"✅ 成功导入 {count} 个measurement到Qdrant")
+    print(f"[Qdrant] Successfully imported {count} measurements")
     return count
 
 
@@ -202,9 +253,9 @@ def main():
     args = parser.parse_args()
     
     # 加载数据
-    print(f"📂 加载文件: {args.file}")
+    print(f"[Loading] File: {args.file}")
     measurements = load_influxdb_ddl(args.file)
-    print(f"📊 共 {len(measurements)} 个measurement")
+    print(f"[Loading] Total: {len(measurements)} measurements")
     
     # 导入
     if args.es_only:
@@ -217,7 +268,7 @@ def main():
         print()
         import_to_qdrant(measurements, delete_existing=args.delete)
     
-    print("\n✨ 导入完成!")
+    print("\n[Done] Import completed!")
 
 
 if __name__ == "__main__":

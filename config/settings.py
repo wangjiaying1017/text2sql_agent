@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     # Qwen Configuration (阿里云 API)
     qwen_api_key: str = Field(default="", alias="QWEN_API_KEY")
     qwen_base_url: str = Field(default="https://dashscope.aliyuncs.com/compatible-mode/v1", alias="QWEN_BASE_URL")
-    qwen_model: str = Field(default="qwen-flash", alias="QWEN_MODEL")
+    qwen_model: str = Field(default="qwen-plus", alias="QWEN_MODEL")
     
     # MySQL Configuration
     mysql_host: str = Field(default="localhost", alias="MYSQL_HOST")
@@ -51,7 +51,7 @@ class Settings(BaseSettings):
     es_password: str = Field(default="", alias="ES_PASSWORD")
     
     # Qdrant Configuration
-    qdrant_host: str = Field(default="localhost", alias="QDRANT_HOST")
+    qdrant_host: str = Field(default="127.0.0.1", alias="QDRANT_HOST")
     qdrant_port: int = Field(default=6333, alias="QDRANT_PORT")
     
 

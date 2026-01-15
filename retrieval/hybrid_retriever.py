@@ -10,6 +10,9 @@ from collections import defaultdict
 
 from scripts.import_to_es import ElasticsearchStore
 from scripts.import_to_qdrant import QdrantStore
+import logging
+
+logger = logging.getLogger("text2sql.retriever")
 
 
 # MySQL索引/集合
@@ -57,6 +60,43 @@ class HybridRetriever:
         self._influxdb_es: Optional[ElasticsearchStore] = None
         self._influxdb_qdrant: Optional[QdrantStore] = None
     
+    def warmup(self) -> dict[str, float]:
+        """
+        预热所有连接（Qdrant + ES + Embedding API）。
+        
+        Returns:
+            各组件预热耗时的字典
+        """
+        import time
+        timings = {}
+        
+        logger.debug(f"[WARMUP] HybridRetriever ({self.database_type})...")
+        
+        for db_type in self._get_target_db_types():
+            # 预热 Qdrant 连接和 Embedding API
+            t0 = time.time()
+            qdrant_store = self._get_qdrant_store(db_type)
+            timings[f"{db_type}_qdrant_init"] = time.time() - t0
+            
+            # 预热 DashScope API（首次 API 调用会有 SSL 握手等开销）
+            warmup_time = qdrant_store.warmup()
+            timings[f"{db_type}_embedding_warmup"] = warmup_time
+            
+            # 预热 ES 连接（如果启用）
+            if self.use_keyword_search:
+                t0 = time.time()
+                es_store = self._get_es_store(db_type)
+                # 发送一个简单查询来预热连接
+                try:
+                    es_store.search("warmup", size=1)
+                except Exception:
+                    pass
+                timings[f"{db_type}_es_warmup"] = time.time() - t0
+        
+        total = sum(timings.values())
+        logger.debug(f"[WARMUP] Retriever ready, total: {total:.2f}s")
+        return timings
+    
     def _get_es_store(self, db_type: str) -> ElasticsearchStore:
         """获取ES存储实例。"""
         if db_type == "mysql":
@@ -72,12 +112,12 @@ class HybridRetriever:
         """获取Qdrant存储实例。"""
         if db_type == "mysql":
             if self._mysql_qdrant is None:
-                print("🔗 初始化MySQL Qdrant连接...")
+                logger.debug("初始化MySQL Qdrant连接...")
                 self._mysql_qdrant = QdrantStore(collection_name=MYSQL_QDRANT_COLLECTION)
             return self._mysql_qdrant
         else:
             if self._influxdb_qdrant is None:
-                print("🔗 初始化InfluxDB Qdrant连接...")
+                logger.debug("初始化InfluxDB Qdrant连接...")
                 self._influxdb_qdrant = QdrantStore(collection_name=INFLUXDB_QDRANT_COLLECTION)
             return self._influxdb_qdrant
     
@@ -86,6 +126,37 @@ class HybridRetriever:
         if self.database_type == "all":
             return ["mysql", "influxdb"]
         return [self.database_type]
+    
+    def _get_search_fields(self, db_type: str) -> list[str]:
+        """
+        获取数据库类型对应的搜索权重配置。
+        
+        Args:
+            db_type: 数据库类型 ("mysql" 或 "influxdb")
+            
+        Returns:
+            搜索字段权重列表
+        """
+        if db_type == "influxdb":
+            # InfluxDB 优化权重：
+            # - measurement_keywords 最高（包含中英文关键词）
+            # - table_name 提高（measurement 名称本身很有语义）
+            # - table_comment 保持高权重
+            return [
+                "measurement_keywords^6",   # 关键词权重最高
+                "table_name^3",             # measurement 名称提高
+                "table_comment^5",          # 描述权重
+                "column_comments_str^4",    # 注释权重
+                "column_names_str^1",       # 字段名权重降低
+            ]
+        else:
+            # MySQL 默认权重
+            return [
+                "table_name^1",
+                "column_names_str^1.5",
+                "table_comment^5",
+                "column_comments_str^5",
+            ]
     
     def search_keyword(self, query: str, limit: int = 10) -> list[dict[str, Any]]:
         """
@@ -103,13 +174,15 @@ class HybridRetriever:
         for db_type in self._get_target_db_types():
             try:
                 es_store = self._get_es_store(db_type)
-                results = es_store.search(query, size=limit)
+                # 使用数据库类型特定的权重配置
+                fields = self._get_search_fields(db_type)
+                results = es_store.search(query, size=limit, fields=fields)
                 # 添加数据库类型标记
                 for r in results:
                     r["database_type"] = db_type
                 all_results.extend(results)
             except Exception as e:
-                print(f"⚠️ ES关键词检索({db_type})失败: {e}")
+                logger.warning(f"ES关键词检索({db_type})失败: {e}")
         
         # 按分数排序并截取
         all_results.sort(key=lambda x: x.get("_score", 0), reverse=True)
@@ -126,18 +199,20 @@ class HybridRetriever:
         Returns:
             检索结果列表，包含_score和表结构信息
         """
+        import time
         all_results = []
         
         for db_type in self._get_target_db_types():
             try:
                 qdrant_store = self._get_qdrant_store(db_type)
                 results = qdrant_store.search(query, limit=limit)
+                
                 # 添加数据库类型标记
                 for r in results:
                     r["database_type"] = db_type
                 all_results.extend(results)
             except Exception as e:
-                print(f"⚠️ Qdrant语义检索({db_type})失败: {e}")
+                logger.warning(f"Qdrant语义检索({db_type})失败: {e}")
         
         # 按分数排序并截取
         all_results.sort(key=lambda x: x.get("_score", 0), reverse=True)
@@ -292,9 +367,9 @@ class HybridRetriever:
     def search(
         self,
         query: str,
-        top_k: int = 10,
-        keyword_limit: int = 20,
-        semantic_limit: int = 20,
+        top_k: int = 5,
+        keyword_limit: int = 10,
+        semantic_limit: int = 10,
         k: int = 60,
     ) -> list[dict[str, Any]]:
         """
@@ -339,6 +414,7 @@ class HybridRetriever:
             - semantic_results: Qdrant语义检索结果
             - fused_results: RRF融合结果
         """
+        import time
         from concurrent.futures import ThreadPoolExecutor, as_completed
         
         keyword_results = []
@@ -348,6 +424,7 @@ class HybridRetriever:
         if self.use_keyword_search:
             # 并行执行ES和Qdrant检索
             with ThreadPoolExecutor(max_workers=2) as executor:
+                start_time = time.time()
                 futures = {
                     executor.submit(self.search_keyword, query, keyword_limit): "keyword",
                     executor.submit(self.search_semantic, query, semantic_limit): "semantic",
@@ -355,17 +432,24 @@ class HybridRetriever:
                 
                 for future in as_completed(futures):
                     search_type = futures[future]
+                    elapsed = time.time() - start_time
                     try:
                         result = future.result()
                         if search_type == "keyword":
                             keyword_results = result
+                            logger.debug(f"ES 关键词检索完成: {elapsed:.2f}s, 结果数: {len(result)}")
                         else:
                             semantic_results = result
+                            logger.debug(f"Qdrant 语义检索完成: {elapsed:.2f}s, 结果数: {len(result)}")
                     except Exception as e:
-                        print(f"⚠️ 并行检索({search_type})失败: {e}")
+                        logger.warning(f"并行检索({search_type})失败: {e}")
         else:
             # 仅执行语义检索
+            start_time = time.time()
             semantic_results = self.search_semantic(query, semantic_limit)
+            elapsed = time.time() - start_time
+            logger.debug(f"Qdrant 语义检索完成: {elapsed:.2f}s, 结果数: {len(semantic_results)}")
+            
         fused_results = self.rrf_fusion(
             keyword_results=keyword_results,
             semantic_results=semantic_results,

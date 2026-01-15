@@ -30,6 +30,10 @@ ES_MAPPING = {
         "structured_description": {"type": "text"},  # 结构化描述，包含 Join Hints
         "relationships": {"type": "object", "enabled": False},  # 关系信息，不索引
         "columns": {"type": "object", "enabled": False},  # 不索引columns对象
+        # InfluxDB 专用字段
+        "measurement_keywords": {"type": "text", "analyzer": "ik_max_word"},  # 提取的关键词
+        "tags_str": {"type": "text", "analyzer": "standard"},  # tags 名称（英文）
+        "fields_str": {"type": "text", "analyzer": "standard"},  # fields 名称（英文）
     }
 }
 
@@ -84,7 +88,7 @@ class ElasticsearchStore:
         """
         # 删除已存在的索引
         if delete_existing:
-            print(f"🗑️  删除已存在的索引: {self.index_name}")
+            print(f"[ES] Deleting existing index: {self.index_name}")
             try:
                 self._client.indices.delete(index=self.index_name)
             except Exception:
@@ -102,11 +106,11 @@ class ElasticsearchStore:
                 exists = False
         
         if exists:
-            print(f"ℹ️  索引已存在: {self.index_name}")
+            print(f"[ES] Index already exists: {self.index_name}")
             return
         
         # 创建索引
-        print(f"📦 创建索引: {self.index_name}")
+        print(f"[ES] Creating index: {self.index_name}")
         self._client.indices.create(
             index=self.index_name,
             mappings=ES_MAPPING

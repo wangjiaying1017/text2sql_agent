@@ -32,7 +32,9 @@ def create_model(
     extra_body: Optional[dict] = None,
     api_key: Optional[str] = None,
     base_url: Optional[str] = None,
-    disable_structured_output: bool = False
+    disable_structured_output: bool = False,
+    timeout: float = 60.0,  # 超时时间（秒）
+    max_retries: int = 2,    # 最大重试次数
 ) -> ChatOpenAI:
     """
     通用的GPT模型创建工厂函数，默认使用GPT_load配置。
@@ -45,6 +47,8 @@ def create_model(
         api_key (Optional[str]): API密钥，默认使用GPT_load_app_key
         base_url (Optional[str]): 基础URL，默认使用GPT_load_base_url
         disable_structured_output (bool): 是否禁用structured output（用于网关兼容性）
+        timeout (float): 请求超时时间（秒），默认120秒
+        max_retries (int): 最大重试次数，默认2次
     
     Returns:
         ChatOpenAI: 配置好的ChatOpenAI模型实例
@@ -61,7 +65,9 @@ def create_model(
         "model": model_name,
         "api_key": default_api_key,
         "base_url": default_base_url,
-        "temperature": temperature
+        "temperature": temperature,
+        "timeout": timeout,
+        "max_retries": max_retries,
     }
     
     # 添加可选参数（如果网关不支持某些功能则跳过）
@@ -85,24 +91,24 @@ def create_model(
 
 
 def create_embedding_model(
-    model_name: str = "text-embedding-3-small",
+    model_name: str = "text-embedding-v4",
     api_key: Optional[str] = None,
     base_url: Optional[str] = None
 ) -> OpenAIEmbeddings:
     """
-    通用的Embedding模型创建工厂函数，默认使用GPT_load配置。
+    通用的Embedding模型创建工厂函数，默认使用DashScope配置。
     
     Args:
-        model_name (str): 嵌入模型名称，默认使用text-embedding-3-small
-        api_key (Optional[str]): API密钥，默认使用GPT_load_app_key
-        base_url (Optional[str]): 基础URL，默认使用GPT_load_base_url
+        model_name (str): 嵌入模型名称，默认使用text-embedding-v4 (DashScope)
+        api_key (Optional[str]): API密钥，默认使用QWEN_API_KEY
+        base_url (Optional[str]): 基础URL，默认使用QWEN_BASE_URL
     
     Returns:
         OpenAIEmbeddings: 配置好的OpenAIEmbeddings实例
     """
-    # 使用LLM_API_KEY配置
-    default_api_key = api_key or settings.llm_api_key
-    default_base_url = base_url or settings.llm_base_url
+    # 使用Qwen API配置（DashScope）
+    default_api_key = api_key or settings.qwen_api_key
+    default_base_url = base_url or settings.qwen_base_url
     
     return OpenAIEmbeddings(
         model=model_name,
@@ -156,7 +162,13 @@ def get_default_gpt5_mini():
     )
 
 
-def get_qwen_model(model_name: str = None, temperature: float = 0.0, max_tokens: int = 2048):
+def get_qwen_model(
+    model_name: str = None,
+    temperature: float = 0.0,
+    max_tokens: int = 2048,
+    timeout: float = 60.0,  # 超时时间（秒）
+    max_retries: int = 2,    # 最大重试次数
+):
     """
     获取 Qwen 模型，通过阿里云 DashScope API 访问。
     
@@ -164,6 +176,8 @@ def get_qwen_model(model_name: str = None, temperature: float = 0.0, max_tokens:
         model_name: Qwen 模型名称，默认使用 settings.qwen_model
         temperature: 温度参数，默认 0.0（结构化输出建议使用低温度）
         max_tokens: 最大输出 token 数，默认 2048（避免输出被截断）
+        timeout: 请求超时时间（秒），默认120秒
+        max_retries: 最大重试次数，默认2次
     
     Returns:
         ChatOpenAI: 配置好的 Qwen 模型实例
@@ -174,16 +188,24 @@ def get_qwen_model(model_name: str = None, temperature: float = 0.0, max_tokens:
         base_url=settings.qwen_base_url,
         temperature=temperature,
         max_tokens=max_tokens,
+        timeout=timeout,
+        max_retries=max_retries,
     )
 
 
 
-def get_llm_client(temperature: float = 0.0) -> ChatOpenAI:
+def get_llm_client(
+    temperature: float = 0.0,
+    timeout: float = 60.0,  # 超时时间（秒）
+    max_retries: int = 2,    # 最大重试次数
+) -> ChatOpenAI:
     """
     Get a configured LLM client.
     
     Args:
         temperature: Sampling temperature (0.0 for deterministic output)
+        timeout: Request timeout in seconds, default 120s
+        max_retries: Maximum retry attempts, default 2
         
     Returns:
         ChatOpenAI: Configured LangChain chat model
@@ -193,4 +215,6 @@ def get_llm_client(temperature: float = 0.0) -> ChatOpenAI:
         base_url=settings.llm_base_url,
         model=settings.llm_model,
         temperature=temperature,
+        timeout=timeout,
+        max_retries=max_retries,
     )

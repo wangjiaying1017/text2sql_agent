@@ -56,6 +56,40 @@ class IntentRecognizer:
             ("human", INTENT_RECOGNITION_USER_PROMPT),
         ])
     
+    def warmup(self) -> dict[str, float]:
+        """
+        预热 IntentRecognizer 的 Qdrant 连接和 Embedding API。
+        
+        由于 QdrantStore 使用共享连接，只需要初始化一次即可。
+        
+        Returns:
+            各组件预热耗时的字典
+        """
+        import time
+        
+        timings = {}
+        total_start = time.time()
+        
+        # 初始化 MySQL Qdrant（会自动创建共享连接）
+        t0 = time.time()
+        mysql_store = self._get_qdrant_store("mysql")
+        timings["mysql_init"] = time.time() - t0
+        
+        # 初始化 InfluxDB Qdrant（复用共享连接，几乎不耗时）
+        t0 = time.time()
+        self._get_qdrant_store("influxdb")
+        timings["influxdb_init"] = time.time() - t0
+        
+        # 预热 Embedding API（只需预热一次，共享）
+        t0 = time.time()
+        mysql_store.warmup()
+        timings["embedding_warmup"] = time.time() - t0
+        
+        timings["total"] = time.time() - total_start
+        print(f"  [OK] IntentRecognizer Qdrant warmup: {timings['total']:.2f}s")
+        
+        return timings
+    
     def _get_qdrant_store(self, db_type: str = "mysql"):
         """
         懒加载 Qdrant 存储实例。
@@ -177,6 +211,8 @@ class IntentRecognizer:
         """
         识别意图并生成查询计划。
         
+        使用 RAG 并行检索 MySQL 和 InfluxDB schema 信息，帮助 LLM 更好地判断。
+        
         Args:
             question: 用户自然语言问题
             context: 对话上下文（用于澄清场景）
@@ -187,36 +223,42 @@ class IntentRecognizer:
         """
         from concurrent.futures import ThreadPoolExecutor
         
-        # 1. 并行执行 MySQL 和 InfluxDB 的 RAG 检索
+        # 1. 并行 RAG 检索 MySQL 和 InfluxDB schema
         with ThreadPoolExecutor(max_workers=2) as executor:
             mysql_future = executor.submit(self._retrieve_relevant_tables, question, "mysql")
-            #influxdb_future = executor.submit(self._retrieve_relevant_tables, question, "influxdb")
+            influxdb_future = executor.submit(self._retrieve_relevant_tables, question, "influxdb")
             
-            relevant_tables = mysql_future.result()
-            #relevant_measurements = influxdb_future.result()
+            mysql_tables = mysql_future.result()
+            influxdb_measurements = influxdb_future.result()
         
-        mysql_tables_info = self._format_table_info(relevant_tables)
-        #influxdb_info = self._format_influxdb_info(relevant_measurements)
+        # 打印检索到的表名
+        mysql_names = [t.get("table_name", "") for t in mysql_tables]
+        influx_names = [m.get("table_name", m.get("measurement_name", "")) for m in influxdb_measurements]
+        print(f"   [RAG] MySQL tables: {mysql_names}")
+        print(f"   [RAG] InfluxDB measurements: {influx_names}")
         
-        # 3. 创建处理链（使用结构化输出，无需额外解析器）
+        # 2. 格式化检索结果
+        mysql_schema = self._format_table_info(mysql_tables)
+        influxdb_schema = self._format_influxdb_info(influxdb_measurements)
+        
+        # 3. 创建处理链（使用结构化输出）
         chain = self.prompt | self.llm
         
         prompt_inputs = {
             "question": question,
-            "context": context if context else "无历史上下文",
-            "mysql_relevant_tables": mysql_tables_info,
-            #"influxdb_relevant_measurements": influxdb_info,
+            "context": context if context else "无历史对话",
+            "mysql_schema": mysql_schema,
+            "influxdb_schema": influxdb_schema,
         }
         
         # 打印完整 prompt（用于调试）
         if verbose:
-            # 手动格式化 prompt 用于显示
             formatted_prompt = self.prompt.format(**prompt_inputs)
-            print("\n" + "="*60)
-            print("📝 Intent Recognition Prompt:")
-            print("="*60)
+            print("\n" + "─"*60)
+            print("📝 [Intent Recognizer] Prompt")
+            print("─"*60)
             print(formatted_prompt)
-            print("="*60 + "\n")
+            print("─"*60 + "\n")
         
         # 4. 执行处理链，直接返回 QueryPlan 对象
         result = chain.invoke(prompt_inputs)

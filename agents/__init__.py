@@ -1,5 +1,4 @@
 # Agents module
-from .tools import get_tools
-from .orchestrator import Text2SQLOrchestrator
+from .sql_generator import SQLGenerator
 
-__all__ = ["get_tools", "Text2SQLOrchestrator"]
+__all__ = ["SQLGenerator"]
