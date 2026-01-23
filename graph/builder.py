@@ -33,7 +33,7 @@ def get_memory_saver():
 
 def build_text2sql_graph(checkpointer=None):
     """
-    构建 Text2SQL 工作流图（Command 模式 + 计划校验 + 多轮对话）。
+    构建 Text2SQL 工作流图（简化版，无澄清机制）。
     
     工作流:
         START → intent → plan_validator → rag → sql_gen → execute → aggregate → human_input → END
@@ -50,41 +50,42 @@ def build_text2sql_graph(checkpointer=None):
     """
     builder = StateGraph(Text2SQLState)
     
-    # 添加节点
+    # ============== 添加节点 ==============
     builder.add_node("intent", intent_node)
     builder.add_node("plan_validator", plan_validator_node)
     builder.add_node("rag", rag_node)
     builder.add_node("sql_gen", sql_gen_node)
     builder.add_node("execute", execute_node)
     builder.add_node("aggregate", aggregate_node)
-    builder.add_node("human_input", human_input_node)  # 🆕 等待用户输入的节点
+    builder.add_node("human_input", human_input_node)
     builder.add_node("error_handler", error_node)
     
-    # 入口
+    # ============== 入口（直接进入 intent） ==============
     builder.add_edge(START, "intent")
     
-    # intent → plan_validator → rag 的顺序执行链
+    # ============== 主流程 ==============
+    # intent → plan_validator → rag
     builder.add_edge("intent", "plan_validator")
     builder.add_edge("plan_validator", "rag")
     
-    # 顺序执行链
+    # rag → sql_gen → execute
     builder.add_edge("rag", "sql_gen")
     builder.add_edge("sql_gen", "execute")
-    # execute 节点通过 Command.goto 决定跳转到 "rag" 或 "aggregate" 或 "error_handler"
+    # execute 通过 Command.goto 决定跳转到 "rag" 或 "aggregate" 或 "error_handler"
     
     # aggregate → human_input → END
     builder.add_edge("aggregate", "human_input")
     builder.add_edge("human_input", END)
     builder.add_edge("error_handler", END)
     
-    # 使用 checkpointer 编译（支持会话记忆）
-    # 在 human_input 节点之前暂停，等待用户输入
+    # ============== 编译 ==============
     if checkpointer is None:
         checkpointer = get_memory_saver()
     
     return builder.compile(
         checkpointer=checkpointer,
-        interrupt_before=["human_input"]  # 🆕 在此节点前暂停
+        # 在 human_input 节点前暂停，等待用户输入
+        interrupt_before=["human_input"]
     )
 
 
@@ -98,5 +99,3 @@ def get_text2sql_graph():
     if _graph_instance is None:
         _graph_instance = build_text2sql_graph()
     return _graph_instance
-
-

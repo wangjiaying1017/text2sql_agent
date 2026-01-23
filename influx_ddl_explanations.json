@@ -5,10 +5,10 @@
   "explanations": [
     {
       "measurement_name": "acc_dns_connectivity",
-      "measurement_description": "加速业务DNS联通性数据表",
+      "measurement_description": "加速业务DNS联通性数据表，当查询某设备的加速业务DNS联通性数据（时延，丢包，抖动）时，需要按出口国家代码分组返回",
       "tags": {
         "client_id": "公司id,代表该设备属于哪个公司",
-        "country_code": "国家代码",
+        "country_code": "出口国家代码",
         "serial": "设备序列号"
       },
       "fields": {
@@ -20,10 +20,10 @@
     },
     {
       "measurement_name": "acc_export_connectivity",
-      "measurement_description": "加速出口联通性数据表",
+      "measurement_description": "加速出口联通性数据表，当查询某设备的加速出口联通性数据（时延，丢包，抖动）时，需要按出口国家代码分组返回",
       "tags": {
         "client_id": "公司id,代表该设备属于哪个公司",
-        "country_code": "国家代码",
+        "country_code": "出口国家代码",
         "serial": "设备序列号"
       },
       "fields": {
@@ -143,12 +143,12 @@
       "tags": {
         "app_id": "应用标识id",
         "client_id": "公司id",
-        "node_id": "边缘节点标识id",
-        "node_ip": "边缘节点ip地址",
-        "node_port": "边缘节点端口号",
-        "serial": "边缘节点设备序列号",
+        "node_id": "节点id",
+        "node_ip": "节点ip地址",
+        "node_port": "节点端口号",
+        "serial": "设备序列号",
         "serial_id": "序列号内部 ID/映射 ID",
-        "service_type": "服务类型，组网（CONNECTION）/加速（CONNECTION_OVERSEAS）"
+        "service_type": "服务类型，组网（CONNECTION）"
       },
       "fields": {
         "create_time": "创建/采集时间戳（integer）",
@@ -166,55 +166,55 @@
       },
       "fields": {
         "create_time": "创建/采集时间戳（integer），毫秒级",
-        "display_name": "展示名称，类型为 string，通常是用于界面显示的友好名称（例如“1号网关-南区”）。",
-        "in": "下行流量/入站流量（进入设备或进入接口的流量），类型为 float。",
+        "display_name": "展示名称，类型为 string，通常是用于界面显示的友好名称。",
+        "in": "下行流量，类型为 float,单位为bps",
         "ip": "设备或接口的 IP 地址，类型为 string。",
-        "is_connected": "连接状态标识，类型为 integer，通常 0/1 表示离线/在线（或 1/0）。",
-        "out": "上行流量/出站流量（从设备发出或从接口流出的流量），类型为 float。",
+        "is_connected": "连接状态标识，类型为 integer，通常 0/1 表示离线/在线。",
+        "out": "上行流量，类型为 float，单位为bps。",
         "speed": "速率或链路速度，类型为 integer。"
       }
     },
     {
       "measurement_name": "edge_business_traffic",
-      "measurement_description": "用于在边缘网关/边缘设备上按业务类型、接口、设备序列号、客户等维度，持续上报并存储网络业务的上下行流量统计数据，以支持流量监控、计费核算、容量规划、异常检测与业务分析等场景。",
+      "measurement_description": "边缘设备业务流量监控",
       "tags": {
-        "client_id": "客户标识/租户ID维度。",
-        "iface": "网络接口名称维度（如 eth0、wan0、ppp0、4g0 等）。",
-        "serial": "设备序列号维度（通常为设备出厂SN或唯一编号）。用于唯一定位具体设备，支持按设备查询历史流量、设备对比、故障溯源等。",
-        "serial_id": "序列号对应的内部ID/设备ID维度。",
-        "service_type": "业务类型维度（如 video、voip、iot、vpn、web、update 等，具体取决于业务定义）。"
+        "client_id": "客户id",
+        "iface": "网络接口名称维度（如 wan0,wan1 等）,一个设备可以有多个物理口。",
+        "serial": "设备序列号维度。",
+        "serial_id": "序列号对应的内部ID",
+        "service_type": "业务类型，（CONNECTION：组网/CONNECTION_OVERSEAS：加速/CONNECTION_BUSINESS：业务/DELIVERY：交付）。"
       },
       "fields": {
-        "business_in_traffic": "业务下行/入方向流量数值（integer）。",
-        "business_out_traffic": "业务上行/出方向流量数值（integer）。",
-        "create_time": "数据产生/采集时间戳（integer）。"
+        "business_in_traffic": "业务下行流量数值（integer），单位bps。",
+        "business_out_traffic": "业务上行流量数值（integer）,单位bps。",
+        "create_time": "数据产生/采集时间戳（integer），毫秒级。"
       }
     },
     {
       "measurement_name": "edge_business_traffic_one_minute",
-      "measurement_description": "用于存储边缘设备/边缘网关在不同业务类型、不同接口上的网络流量统计结果，并以 1 分钟为时间窗口，对该分钟内的流量指标进行 min/mean/max 等聚合后写入 InfluxDB，便于按设备/...",
+      "measurement_description": "边缘设备流量监控，并以 1 分钟为时间窗口进行聚合，",
       "tags": {
-        "client_id": "客户/租户/项目的标识，用于区分不同客户的数据边界与查询过滤（例如按客户汇总流量、对比客户间负载）。",
-        "iface": "网络接口名称或接口标识（如 eth0、wan0、ppp0、ens160 等），用于按接口维度过滤和分组统计流量，定...",
-        "serial": "设备序列号/设备唯一标识（SN），用于定位具体边缘设备的数据来源。",
-        "service_type": "业务类型/服务类别维度，用于区分不同业务流量（例如 video、iot、vpn、web、voice、cdn 等，具..."
+        "client_id": "客户id。",
+        "iface": "网络接口名称或接口标识（如 eth0、wan0等），一个设备可以有多个接口",
+        "serial": "设备序列号",
+        "service_type": "业务类型，（CONNECTION：组网/CONNECTION_OVERSEAS：加速/CONNECTION_BUSINESS：业务/DELIVERY：交付）"
       },
       "fields": {
-        "max_business_in_traffic": "1 分钟窗口内“业务下行流量”流量的最大值（integer）。",
-        "max_business_out_traffic": "1 分钟窗口内“业务上行流量”流量的最大值（integer）。",
-        "mean_business_in_traffic": "1 分钟窗口内“业务下行流量”流量的平均值（float）。",
-        "mean_business_out_traffic": "1 分钟窗口内“业务上行流量”流量的平均值（float）。",
-        "min_business_in_traffic": "1 分钟窗口内“业务下行流量”流量的最小值（integer）。",
-        "min_business_out_traffic": "1 分钟窗口内“业务上行流量”流量的最小值（integer）。"
+        "max_business_in_traffic": "1 分钟窗口内“业务下行流量”流量的最大值（integer），单位bps。",
+        "max_business_out_traffic": "1 分钟窗口内“业务上行流量”流量的最大值（integer），单位bps。",
+        "mean_business_in_traffic": "1 分钟窗口内“业务下行流量”流量的平均值（float），单位bps。",
+        "mean_business_out_traffic": "1 分钟窗口内“业务上行流量”流量的平均值（float，单位bps。",
+        "min_business_in_traffic": "1 分钟窗口内“业务下行流量”流量的最小值（integer）,单位bps。",
+        "min_business_out_traffic": "1 分钟窗口内“业务上行流量”流量的最小值（integer），单位bps。"
       }
     },
     {
       "measurement_name": "edge_business_traffic_serial_one_minute",
-      "measurement_description": "用于存储边缘侧某类业务在“按设备序列号（serial）维度”上的网络流量统计数据，数据以1分钟为周期进行聚合，并提供该分钟内的最大值、最小值与平均值（分别针对入方向与出方向）。",
+      "measurement_description": "边缘设备流量监控，以设备序列号为维度，并以 1 分钟为时间窗口进行聚合，",
       "tags": {
-        "client_id": "客户/租户标识（Tenant ID）。",
-        "serial": "设备序列号/边缘节点唯一标识（Serial Number）。",
-        "service_type": "业务类型/服务类别标识（Service Type）。"
+        "client_id": "客户id。",
+        "serial": "设备序列号。",
+        "service_type": "业务类型，（CONNECTION：组网/CONNECTION_OVERSEAS：加速/CONNECTION_BUSINESS：业务/DELIVERY：交付）"
       },
       "fields": {
         "max_business_in_traffic": "1分钟窗口内“业务下行流量”的最大值（integer）。",
@@ -227,15 +227,15 @@
     },
     {
       "measurement_name": "edge_business_traffic_ten_second_sum",
-      "measurement_description": "用于存储边缘侧按 10 秒时间窗口聚合后的业务流量统计数据，通常来源于原始更细粒度的流量计数/字节数，通过按时间窗口求和得到。",
+      "measurement_description": "边缘设备流量监控，并以 10 秒为时间窗口进行聚合，",
       "tags": {
-        "client_id": "客户/租户/项目的标识（多租户维度）。",
-        "serial": "设备序列号或边缘网关/探针的唯一标识（设备维度）。",
-        "service_type": "业务类型/服务类别维度（例如不同应用、协议、产品线或业务通道）。"
+        "client_id": "客户id。",
+        "serial": "设备序列号。",
+        "service_type": "业务类型，（CONNECTION：组网/CONNECTION_OVERSEAS：加速/CONNECTION_BUSINESS：业务/DELIVERY：交付）"
       },
       "fields": {
-        "business_in_traffic": "业务入向流量的聚合值（integer）。",
-        "business_out_traffic": "业务出向流量的聚合值（integer）。"
+        "business_in_traffic": "下行流量的聚合值，单位bps，（integer）。",
+        "business_out_traffic": "上行流量的聚合值，单位bps，（integer）。"
       }
     },
     {
@@ -272,32 +272,33 @@
     },
     {
       "measurement_name": "edge_line_business_traffic",
-      "measurement_description": "用于按客户端/节点/端口/公网 IP/序列号/业务类型等维度，记录某条边缘线路在某个时间点或时间窗口内的业务入/出方向流量统计，用于带宽监控、计费核算、容量规划、异常检测（突增/突降）以及按维度...",
+      "measurement_description": "边缘设备线路业务监控流量",
       "tags": {
-        "client_id": "客户端/租户标识（维度字段）。",
-        "node_id": "边缘节点或设备节点标识（维度字段）。",
-        "port": "端口号（维度字段，通常为服务端口或业务端口）。",
-        "public_ip": "公网 IP（维度字段，可能是节点出口公网 IP 或业务对外暴露 IP）。",
-        "serial": "设备序列号（维度字段，通常为硬件 SN 或软件实例序列号）。",
-        "serial_id": "序列号对应的内部 ID（维度字段）。",
-        "service_type": "业务类型（维度字段）。"
+        "client_id": "客户id。",
+        "node_id": "节点id。",
+        "port": "端口号。",
+        "public_ip": "公网IP。",
+        "serial": "设备序列号。",
+        "serial_id": "序列号对应的内部ID。",
+        "service_type": "业务类型，（CONNECTION：组网/CONNECTION_OVERSEAS：加速/DELIVERY：交付）。"
       },
       "fields": {
-        "business_in_traffic": "业务入方向流量计数（integer）。",
-        "business_out_traffic": "业务出方向流量计数（integer）。",
-        "create_time": "数据生成/采集时间戳（integer）。"
+        "business_in_traffic": "下行流量计数（integer），单位bps。",
+        "business_out_traffic": "上行流量计数（integer），单位bps。",
+        "create_time": "数据生成/采集时间戳（integer），毫秒级。"
       }
     },
     {
       "measurement_name": "edge_line_business_traffic_one_minute",
-      "measurement_description": "用于存储边缘网络/专线/链路在“业务口径”下的流量统计数据，时间粒度为每分钟一条（或每分钟聚合后的一条）记录。",
+      "measurement_description": "边缘设备线路业务监控流量，时间粒度为每分钟一条（或每分钟聚合后的一条）记录。",
       "tags": {
-        "client_id": "客户标识/租户 ID。",
-        "node_id": "边缘节点/站点/设备节点 ID。用于定位流量产生的边缘节点，支持按节点维度聚合与对比（如节点间流量分布、异常节点排查）。",
-        "port": "端口标识（可能是物理端口号、逻辑端口名、业务端口/接口编号）。",
-        "public_ip": "公网 IP（可能代表对端地址、出口 IP 或绑定在端口/节点上的公网地址）。",
-        "serial": "设备序列号（SN）。用于唯一标识具体硬件设备，适用于同一 node_id 下存在多设备或需要跨系统对齐资产信息的场景。",
-        "service_type": "业务类型/服务类型（如加速、专线、VPN、NAT、视频、游戏等的分类，具体以业务枚举为准）。"
+        "client_id": "客户id。",
+        "node_id": "节点id。",
+        "port": "端口号。",
+        "public_ip": "公网IP。",
+        "serial": "设备序列号。",
+        "serial_id": "序列号对应的内部ID。",
+        "service_type": "业务类型，（CONNECTION：组网/CONNECTION_OVERSEAS：加速/DELIVERY）。"
       },
       "fields": {
         "max_business_in_traffic": "1 分钟统计窗口内“业务下行流量”流量的最大值（integer）。",
@@ -310,10 +311,10 @@
     },
     {
       "measurement_name": "edge_monitor",
-      "measurement_description": "用于持续写入边缘侧设备（如网关、工控机、边缘服务器/盒子）的运行状态与资源使用情况指标，便于对设备健康度、性能与容量进行时序分析、告警与趋势预测。",
+      "measurement_description": "边缘设备监控，包括cpu使用率、内存使用率、磁盘使用率、温度等信息",
       "tags": {
-        "serial": "设备序列号/出厂编号（通常为字符串）。",
-        "serial_id": "序列号的内部ID或业务侧设备ID（可能是平台生成的唯一标识）。"
+        "serial": "设备序列号",
+        "serial_id": "序列号的内部ID"
       },
       "fields": {
         "cpu_usage": "CPU 使用率（float）。",
@@ -328,18 +329,18 @@
     },
     {
       "measurement_name": "edge_node_monitor",
-      "measurement_description": "用于持续写入边缘节点（edge node）的网络连通性与链路质量指标（如时延、抖动、丢包率、收发速率等），并通过一组标签（tags）标识节点、客户、服务类型、运行模式以及是否为最佳/活跃线路等维...",
+      "measurement_description": "边缘设备节点业务联通性数据监控，包括时延、抖动、丢包率、收发速率等信息",
       "tags": {
-        "active": "活跃标识/启用状态维度标签。",
-        "best": "最佳线路/最优节点标识标签。",
-        "client_id": "客户/租户 ID 标签。用于区分不同客户的数据隔离与按客户维度统计（如某客户下所有节点的平均时延、丢包率）。",
-        "mode": "运行模式/测量模式标签。",
-        "node_id": "边缘节点 ID 标签。核心维度字段，用于唯一标识某个边缘节点实例，便于按节点过滤、聚合与定位问题节点。",
-        "port": "端口标签。",
-        "public_ip": "节点公网 IP 标签。",
-        "serial": "设备序列号标签。通常为硬件/设备的唯一序列号，用于在 node_id 变更或重装等情况下仍能追踪到同一物理设备。",
-        "serial_id": "序列号ID/设备资产ID 标签。",
-        "service_type": "服务类型标签。"
+        "active": "活跃标识/启用状态，true/false。",
+        "best": "最佳线路/最优节点，true/false。",
+        "client_id": "客户id。",
+        "mode": "模式 0/1。",
+        "node_id": "边缘节点 ID。",
+        "port": "端口。",
+        "public_ip": "节点公网 IP。",
+        "serial": "设备序列号。",
+        "serial_id": "序列号ID。",
+        "service_type": "业务类型，（CONNECTION：组网/CONNECTION_OVERSEAS：加速/DELIVERY）"
       },
       "fields": {
         "create_time": "创建/采集时间戳（integer）。",
@@ -352,59 +353,59 @@
     },
     {
       "measurement_name": "edge_wan_traffic",
-      "measurement_description": "用于在边缘侧（如网关/路由器/CPE 等）持续上报某个 WAN 接口的进出流量统计，便于云端进行带宽使用分析、流量趋势监控、异常流量检测、计费或容量规划等。",
+      "measurement_description": "边缘设备wan口流量监控",
       "tags": {
-        "client_id": "客户/租户/项目的标识（逻辑归属维度）。",
-        "iface": "网络接口名称或接口标识（如 wan0、pppoe0、eth1 等）。",
-        "serial": "设备序列号（通常为厂商出厂 SN）。用于唯一识别设备实体，支持按设备维度查询历史流量、定位单台设备的异常与趋势。",
-        "serial_id": "序列号的内部ID/映射ID（可能是平台内的设备主键、资产ID或序列号的数值化/脱敏版本）。"
+        "client_id": "客户id。",
+        "iface": "网络接口名称或接口标识（如 wan0、wan1 等）,一台设备会有多个接口。",
+        "serial": "设备序列号",
+        "serial_id": "序列号的内部ID"
       },
       "fields": {
-        "create_time": "数据产生/上报时间的整型表示（常见为 Unix 时间戳，单位可能为秒或毫秒，需结合实际数据量级判断）。",
-        "wan_in_traffic": "WAN 下行流量统计值（从外网/上联进入设备的流量）。",
-        "wan_out_traffic": "WAN 上行流量流量统计值（从设备发往外网/上联的流量）。"
+        "create_time": "数据产生/上报时间的整型表示（常见为 Unix 时间戳，单位可能为毫秒）。",
+        "wan_in_traffic": "WAN 下行流量统计值,bps",
+        "wan_out_traffic": "WAN 上行流量流量,bps"
       }
     },
     {
       "measurement_name": "edge_wan_traffic_one_minute",
-      "measurement_description": "用于存储边缘设备在 WAN 接口上的流量统计数据，并且这些数据是以每分钟为一个统计窗口进行汇总（例如对该分钟内的瞬时速率或采样值计算最小/平均/最大）。",
+      "measurement_description": "边缘设备wan口流量监控，时间粒度为一分钟",
       "tags": {
-        "client_id": "客户/租户/站点的标识符，用于区分不同客户或不同业务归属。",
-        "iface": "接口名称或接口标识（如 wan0、eth1、pppoe0 等），用于区分同一设备上的不同网络口。",
-        "serial": "设备序列号/硬件唯一标识，用于唯一定位一台边缘设备。"
+        "client_id": "客户id。",
+        "iface": "接口名称或接口标识（如 wan0,wan1等），用于区分同一设备上的不同网络口。",
+        "serial": "设备序列号。"
       },
       "fields": {
-        "max_wan_in_traffic": "1 分钟统计窗口内 WAN 下行方向（in，通常指从公网/上游进入设备，或从 WAN 侧进入 LAN 侧的方向）的最...",
-        "max_wan_out_traffic": "1 分钟统计窗口内 WAN 上行方向（out，通常指从设备发往公网/上游）的最大流量值。",
-        "mean_wan_in_traffic": "1 分钟统计窗口内 WAN 下行方向的平均流量值（均值）。",
-        "mean_wan_out_traffic": "1 分钟统计窗口内 WAN 上行方向的平均流量值（均值）。",
-        "min_wan_in_traffic": "1 分钟统计窗口内 WAN 下行方向的最小流量值。",
-        "min_wan_out_traffic": "1 分钟统计窗口内 WAN 上行方向的最小流量值。"
+        "max_wan_in_traffic": "1 分钟统计窗口内 WAN 下行方向流量最大值",
+        "max_wan_out_traffic": "1 分钟统计窗口内 WAN 上行方向流量最大值",
+        "mean_wan_in_traffic": "1 分钟统计窗口内 WAN 下行方向流量均值",
+        "mean_wan_out_traffic": "1 分钟统计窗口内 WAN 上行方向流量均值",
+        "min_wan_in_traffic": "1 分钟统计窗口内 WAN 下行方向流量最小值",
+        "min_wan_out_traffic": "1 分钟统计窗口内 WAN 上行方向流量最小值"
       }
     },
     {
       "measurement_name": "link_check_monitor",
-      "measurement_description": "用于记录对某个目标 IP/链路进行连通性检测（如 Ping/探测请求）后的质量指标与结果，用于持续监测网络链路健康状态、定位丢包/时延抖动问题，并支持按客户端、设备、接口、目标地址、探测方式等维...",
+      "measurement_description": "链路检测监控数据",
       "tags": {
-        "client_id": "客户端/租户/业务侧标识，用于区分数据归属与按客户维度过滤、汇总统计（例如按 client_id 统计链路质量）。",
-        "iface": "网络接口名称或接口标识（如 eth0、wan1、pppoe0 等），用于区分同一设备不同出入口链路的探测结果，便于...",
-        "ip": "被探测的目标 IP 地址（对端、网关、DNS、业务服务器等），用于按目标维度过滤与对比不同目的地址的链路质量。",
-        "method": "探测方法/协议类型（如 ping/icmp、tcp_ping、http、udp 等），用于区分不同探测机制产生的指...",
-        "serial": "设备序列号/探针设备唯一标识，用于定位数据来源设备，支持按设备维度过滤、聚合与排查某台设备的链路问题。"
+        "client_id": "客户id",
+        "iface": "网络接口名称或接口标识（如 wan0,wan1 等），一台设备会有多个接口",
+        "ip": "被探测的目标 IP 地址",
+        "method": "探测方法/协议类型（如 ping,dns 等），",
+        "serial": "设备序列号"
       },
       "fields": {
-        "create_time": "采集/记录生成时间戳（整数）。",
+        "create_time": "采集/记录生成时间戳（integer）。",
         "drop_rate": "丢包率（float）。",
-        "jitter": "时延抖动（float）。",
-        "ping": "Ping 往返时延 RTT（float）。"
+        "jitter": "抖动（float）。",
+        "ping": "时延（float）。"
       }
     },
     {
       "measurement_name": "m100_session_monitor",
-      "measurement_description": "用于记录某个客户端(client)或某个设备序列号(serial)维度下的会话相关统计信息，例如会话创建/建立时间点以及会话数量、累计会话数等，用于监控连接状态、会话规模变化与异常波动。",
+      "measurement_description": "m100会话监控",
       "tags": {
-        "client_id": "客户端标识ID，作为维度用于区分不同客户/租户/业务方或不同接入应用。",
-        "serial": "设备序列号或硬件唯一标识，用于定位到具体设备/网关/边缘节点。"
+        "client_id": "公司id,代表该设备属于哪个公司",
+        "serial": "设备序列号"
       },
       "fields": {
         "create_time": "会话创建时间或记录生成时间（integer）。",
@@ -413,23 +414,23 @@
     },
     {
       "measurement_name": "node_bandwidth_monitor",
-      "measurement_description": "用于监控“节点（node）”的网络带宽/流量情况的时序数据表。通常会按节点维度持续写入网络入站（in）与出站（out）流量或速率等指标，以便进行带宽使用趋势分析、告警（超阈值）、容量规划与故障排查。",
+      "measurement_description": "节点带宽监控表。",
       "tags": {
-        "name": "节点或监控对象的名称（可读性标识）。",
-        "node_id": "节点唯一标识（如设备ID/实例ID/边缘节点ID）。"
+        "name": "节点名",
+        "node_id": "节点id"
       },
       "fields": {
-        "create_time": "记录创建时间或采集时间的时间戳（integer 类型，常见为 Unix 时间戳：秒或毫秒）。",
-        "in": "下行流量/入站带宽指标（float）。",
-        "name": "名称字符串字段（string），可能与 tag 的 name 含义相同，用于保存原始上报值或兼容历史数据/查询习惯。",
-        "out": "上行流量/出站带宽指标（float）。"
+        "create_time": "记录创建时间或采集时间的时间戳（integer 类型，常见为 Unix 时间戳：毫秒）。",
+        "in": "下行流量带宽指标（float）。",
+        "name": "节点名",
+        "out": "上行流量带宽指标（float）。"
       }
     },
     {
       "measurement_name": "node_monitor",
-      "measurement_description": "用于按时间持续写入各个计算节点（如边缘节点、服务器、虚拟机、容器宿主机等）的资源使用情况与容量信息，便于进行实时监控、告警、趋势分析和容量规划。",
+      "measurement_description": "节点监控表。",
       "tags": {
-        "node_id": "节点唯一标识（如主机ID、设备序列号、实例ID等）。",
+        "node_id": "节点id。",
         "public_ip": "节点对外提供服务或可被访问的公网 IP 地址。"
       },
       "fields": {
@@ -443,10 +444,10 @@
     },
     {
       "measurement_name": "session_monitor",
-      "measurement_description": "用于记录某个客户端/设备在一段时间内的会话相关统计数据，例如会话创建时间、当前/累计会话数量、连接数或其他与 session 生命周期相关的计数指标。",
+      "measurement_description": "用于记录某个设备在一段时间内的会话数统计，10s统计一次，当需要查询某个设备的会话数时，需要将该设备按分钟返回，取这一分钟内的最大值",
       "tags": {
-        "client_id": "客户端标识（如租户ID、应用实例ID、用户侧客户端ID等）。",
-        "serial": "设备序列号/网关序列号/实例序列号等唯一标识。"
+        "client_id": "公司id。",
+        "serial": "设备序列号。"
       },
       "fields": {
         "create_time": "会话创建时间的数值表示（integer）。",
@@ -455,44 +456,44 @@
     },
     {
       "measurement_name": "top_ip_traffic",
-      "measurement_description": "用于记录在某个时间点（由 InfluxDB 的 time 列隐含表示）某个客户端/设备在上行或下行方向上，流量（或速率）最高的目标/对端 IP 相关的会话/连接统计信息。",
+      "measurement_description": "用于记录在某个时间点某个设备在上行或下行方向上，网络使用流量的TOP IP统计信息。",
       "tags": {
-        "client_id": "客户端/租户/业务方标识（维度字段）。",
-        "serial": "设备序列号或探针/网关的唯一编号（维度字段）。用于定位数据来源设备，支持按单设备查询、聚合统计和故障排查。",
-        "up_down": "流量方向标识（维度字段），常见取值推测为“up/上行”“down/下行”（或 0/1）。"
+        "client_id": "公司id。",
+        "serial": "设备序列号。",
+        "up_down": "流量方向标识，0，1。"
       },
       "fields": {
-        "app_id": "应用标识 ID（整数）。",
-        "create_time": "记录生成时间/采集时间（Unix 时间戳，整数）。",
-        "dest_ip": "目的 IP 地址（字符串）。",
-        "dest_port": "目的端口（整数）。用于识别访问的服务类型（如 80/443/53 等）或结合协议做更细的流量归因与排查。",
-        "local_ip": "本地 IP 地址（字符串）。表示产生该流量的内网主机/设备 IP，或网关侧内网接口地址；用于定位具体内网来源。",
-        "local_port": "本地端口（整数）。通常是客户端临时端口或本地服务端口，可用于会话级排查与连接定位。",
-        "node_id": "节点 ID（字符串）。",
-        "node_ip": "节点 IP（字符串）。对应采集/上报节点的网络地址，用于运维定位与链路排查（如确认数据来自哪个边缘节点）。",
-        "node_port": "节点端口（整数）。可能是节点服务端口、上报端口或管理端口信息，用于与 node_ip 一起标识具体的节点服务实例。",
-        "peer": "对端标识（整数）。",
-        "protocol": "协议类型（字符串）。",
-        "rate": "速率/流量强度（整数）。"
+        "app_id": "应用标识 ID(integer)。",
+        "create_time": "记录生成时间/采集时间（integer）。",
+        "dest_ip": "目的 IP 地址(string)。",
+        "dest_port": "目的端口(integer)。",
+        "local_ip": "源IP 地址(string)。",
+        "local_port": "源端口(integer)。",
+        "node_id": "节点 ID（string）。",
+        "node_ip": "节点 IP（string）。",
+        "node_port": "节点端口（integer）。",
+        "peer": "对端标识（integer）。",
+        "protocol": "协议类型（string），UDP/TCP",
+        "rate": "速率/流量强度（integer，单位是kbps）。"
       }
     },
     {
       "measurement_name": "wan_connectivity",
-      "measurement_description": "该 measurement 名称可理解为“广域网（WAN）连接连通性/质量监测”。",
+      "measurement_description": "wan口联通性数据监控。如果要查询某设备WAN口的联通性（丢包，时延，抖动），需要将该设备的所有的物理口的联通性分组返回（按wan口以及ip分组）",
       "tags": {
-        "client_id": "客户/租户/站点或业务实例的标识，用于多租户隔离与按客户维度过滤、聚合统计（例如按客户统计 WAN 可用性）。",
-        "iface": "网络接口名称或标识（如 wan0、pppoe0、eth1、cellular0 等），用于区分同一设备的不同外网出口...",
-        "ip": "WAN 侧 IP 地址（可能是接口获取到的公网/私网地址，或探测目标 IP），用于定位链路地址变化、区分多出口与排...",
-        "serial": "设备序列号（硬件 SN），用于唯一标识设备并与资产系统关联，便于跨系统追踪同一设备的 WAN 质量历史。",
-        "serial_id": "序列号的内部ID/规范化ID（可能是平台侧主键或加密/脱敏后的序列标识），用于提升索引一致性或与其他表关联。",
-        "type": "链路类型/探测类型/运营商类型等分类标签（如 fiber、dsl、lte/5g、static/dhcp/pppoe..."
+        "client_id": "公司id,代表该设备属于哪个公司",
+        "iface": "wan口名称，一个设备可包含多个物理口，如eth0,wan0，wan1等",
+        "ip": "WAN 侧 IP 地址",
+        "serial": "设备序列号",
+        "serial_id": "序列号的内部ID/规范化ID",
+        "type": "类型，枚举类型1/0分别代表什么"
       },
       "fields": {
-        "create_time": "记录生成时间（整数）。",
+        "create_time": "记录生成时间（integer）。",
         "drop_rate": "丢包率（float）。",
-        "iface_status": "接口状态（integer）。",
-        "jitter": "时延抖动（float）。",
-        "ping": "Ping 探测时延/RTT（float）。"
+        "iface_status": "接口状态（integer）。枚举类型1/-1",
+        "jitter": "抖动（float）。",
+        "ping": "时延（float）。"
       }
     }
   ]

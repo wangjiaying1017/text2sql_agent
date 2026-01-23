@@ -35,10 +35,21 @@ def log_node_start(node_name: str, state: Text2SQLState, show_fields: list[str] 
 
 
 # ============== 单例缓存（避免重复初始化） ==============
+_query_parser = None
 _intent_recognizer = None
 _mysql_retriever = None
 _influxdb_retriever = None
 _sql_generator = None
+
+
+def get_query_parser():
+    """获取 QueryParser 单例。"""
+    global _query_parser
+    if _query_parser is None:
+        from intent.query_parser import QueryParser
+        logger.debug("首次初始化 QueryParser...")
+        _query_parser = QueryParser(model_name="qwen-flash")
+    return _query_parser
 
 
 def get_intent_recognizer():
@@ -132,6 +143,44 @@ def warmup_all(database_types: list[str] = None) -> dict[str, float]:
 # ======================================================
 
 
+def _generate_result_summary(results: list[dict[str, Any]], max_items: int = 3) -> str:
+    """
+    生成查询结果的文本摘要。
+    
+    Args:
+        results: 查询结果列表
+        max_items: 摘要中最多展示的条目数
+        
+    Returns:
+        结果摘要字符串
+    """
+    if not results:
+        return "无结果"
+    
+    total = len(results)
+    
+    # 提取关键字段用于摘要
+    key_fields = ["name", "serial", "client_id", "id", "device_id","node_id"]
+    summaries = []
+    
+    for row in results[:max_items]:
+        # 找到第一个有值的关键字段
+        for field in key_fields:
+            if row.get(field):
+                summaries.append(str(row[field]))
+                break
+        else:
+            # 如果没有关键字段，取第一个字段的值
+            if row:
+                first_value = list(row.values())[0]
+                summaries.append(str(first_value)[:30])
+    
+    if total <= max_items:
+        return f"共{total}条: {', '.join(summaries)}"
+    else:
+        return f"共{total}条，包括: {', '.join(summaries)}等"
+
+
 def format_context(
     results: list[dict[str, Any]], 
     max_rows: int = 20,
@@ -183,6 +232,183 @@ def format_context(
     return context
 
 
+# ============== 澄清机制节点 ==============
+
+def query_parser_node(state: Text2SQLState, config: RunnableConfig) -> Command:
+    """
+    问题解析节点 - 将用户问题结构化并判断是否需要澄清。
+    
+    功能：
+    1. 检索长期记忆（向量相似度）
+    2. 解析用户问题为结构化语义信息
+    3. 判断是否需要澄清
+    4. 根据置信度决定下一步：继续执行 or 进入澄清流程
+    """
+    #log_node_start("query_parser_node", state, ["question", "clarification_count"])
+    total_start = time.time()
+    
+    # 获取 QueryParser 单例
+    parser = get_query_parser()
+    
+    # ============== 构建上下文（预解析参数 + 短期记忆 + 长期记忆）==============
+    context_parts = []
+    
+    # 0. 主 Agent 传入的预解析参数（优先级最高）
+    serial = state.get("serial")
+    client_id = state.get("client_id")
+    has_entity_context = serial or client_id
+    
+    if has_entity_context:
+        entity_info = []
+        if serial:
+            entity_info.append(f"设备序列号: {serial}")
+        if client_id:
+            entity_info.append(f"客户ID: {client_id}")
+        context_parts.append("已知当前查询涉及到的客户id(client_id)/设备序列号(serial)：\n" + "\n".join(entity_info))
+        logger.info(f"[query_parser_node] 使用主Agent预解析参数: serial={serial}, client_id={client_id}")
+    
+    # 1. 短期记忆：从 state["messages"] 获取最近的问题
+    messages = state.get("messages", [])
+    if messages:
+        recent = [msg.content for msg in messages[-4:] if msg.type == "human"]
+        if recent:
+            context_parts.append("最近的对话：\n" + "\n".join(f"- {q}" for q in recent))
+    
+    # 2. 长期记忆：从向量库检索相关历史
+    try:
+        from memory import LongTermMemory
+        memory = LongTermMemory()
+        relevant_history = memory.retrieve(
+            query=state["question"],
+            limit=3,
+            score_threshold=0.5
+        )
+        
+        if relevant_history:
+            history_lines = []
+            for h in relevant_history:
+                score = h.get("_score", 0)
+                question = h.get("question", "")
+                result = h.get("result_summary", "")
+                history_lines.append(f"- [相似度:{score:.2f}] 问题: {question}, 结果: {result}")
+            
+            context_parts.append("相关历史记录：\n" + "\n".join(history_lines))
+            logger.debug(f"[query_parser_node] 检索到 {len(relevant_history)} 条相关长期记忆")
+    except Exception as e:
+        logger.warning(f"[query_parser_node] 长期记忆检索失败: {e}")
+    
+    context = "\n\n".join(context_parts)
+    
+    # 解析问题
+    parsed = parser.parse(
+        question=state["question"],
+        context=context,
+        verbose=True
+    )
+    
+    total_time = time.time() - total_start
+    
+    # 检查是否需要澄清
+    clarification_count = state.get("clarification_count", 0)
+    skip_clarification = state.get("skip_clarification", False)
+    max_clarifications = 2
+    
+    # 如果主 Agent 已提供关键实体，降低澄清需求
+    # 检查澄清问题是否与实体相关（设备/客户），如果是且有预解析参数，则跳过
+    entity_related_keywords = ["设备", "客户", "哪个", "哪些", "具体"]
+    clarification_is_entity_related = parsed.clarification_question and any(
+        kw in parsed.clarification_question for kw in entity_related_keywords
+    )
+    
+    # 如果有预解析参数且澄清是实体相关的，不需要澄清
+    skip_entity_clarification = has_entity_context and clarification_is_entity_related
+    
+    needs_clarify = (
+        parsed.confidence == "low" 
+        and parsed.clarification_question 
+        and clarification_count < max_clarifications
+        and not skip_clarification
+        and not skip_entity_clarification  # 新增：有预解析参数时跳过实体相关澄清
+    )
+    
+    if needs_clarify:
+        logger.info(f"[query_parser_node] 需要澄清 (已澄清 {clarification_count}/{max_clarifications} 次)")
+        logger.info(f"[query_parser_node] 澄清问题: {parsed.clarification_question}")
+        
+        return Command(
+            update={
+                "parsed_query": parsed.model_dump(),
+                "clarification_question": parsed.clarification_question,
+                "timing": {"query_parser": round(total_time, 2)}
+            },
+            goto="clarify"
+        )
+    else:
+        if skip_entity_clarification:
+            logger.info(f"[query_parser_node] 主Agent已提供实体信息，跳过实体相关澄清")
+        elif clarification_count >= max_clarifications:
+            logger.info(f"[query_parser_node] 已达最大澄清次数，强制继续")
+        elif skip_clarification:
+            logger.info(f"[query_parser_node] 用户跳过澄清，强制继续")
+        else:
+            logger.info(f"[query_parser_node] 问题清晰 (confidence={parsed.confidence})，继续执行")
+        
+        return Command(
+            update={
+                "parsed_query": parsed.model_dump(),
+                "clarification_question": None,
+                "timing": {"query_parser": round(total_time, 2)}
+            },
+            goto="intent"
+        )
+
+
+def clarify_node(state: Text2SQLState, config: RunnableConfig) -> Command:
+    """
+    澄清节点 - 暂停等待用户回复。
+    
+    功能：
+    1. 输出澄清问题
+    2. 增加澄清计数
+    3. 跳转到 human_input 等待用户输入
+    
+    用户可以：
+    - 回答澄清问题（重新进入 query_parser）
+    - 输入 "继续" 或 "跳过" 强制执行
+    """
+    #log_node_start("clarify_node", state, ["clarification_question", "clarification_count"])
+    
+    clarification_count = state.get("clarification_count", 0)
+    question = state.get("clarification_question", "请提供更多信息")
+    
+    logger.info(f"[clarify_node] 第 {clarification_count + 1} 次澄清: {question}")
+    
+    # 更新状态，跳转到等待用户输入
+    return Command(
+        update={
+            "clarification_count": clarification_count + 1,
+            # 保存澄清问题到状态，供 main.py 显示
+            "clarification_question": question,
+        },
+        goto="wait_clarification"
+    )
+
+
+def wait_clarification_node(state: Text2SQLState, config: RunnableConfig) -> Command:
+    """
+    等待澄清输入节点 - 配合 interrupt_before 使用。
+    
+    工作流会在此节点前暂停，等待用户输入澄清答案。
+    用户的回答会被追加到 question 中，然后重新进入 query_parser。
+    """
+    log_node_start("wait_clarification_node", state, [])
+    
+    # 此节点实际不会执行（因为 interrupt_before）
+    # 当用户输入后，外部会更新 question 并重新 invoke
+    
+    return Command(update={})
+
+
 def intent_node(state: Text2SQLState, config: RunnableConfig) -> Command:
     """意图识别节点 - 生成查询计划"""
     log_node_start("intent_node", state, ["question", "messages"])
@@ -198,13 +424,41 @@ def intent_node(state: Text2SQLState, config: RunnableConfig) -> Command:
         context_parts = []
         messages = state.get("messages", [])
         
+        # 2.1 主 Agent 传入的预解析参数（优先级最高）
+        serial = state.get("serial")
+        client_id = state.get("client_id")
+        if serial or client_id:
+            entity_info = []
+            if serial:
+                entity_info.append(f"设备序列号: {serial}")
+            if client_id:
+                entity_info.append(f"客户ID: {client_id}")
+            context_parts.append("已知当前查询涉及到的客户id(client_id)/设备序列号(serial)：\n" + "\n".join(entity_info))
+        
+        # 2.2 澄清后的结构化理解（来自 query_parser）
+        parsed_query = state.get("parsed_query")
+        if parsed_query:
+            pq_info = []
+            if parsed_query.get("query_type"):
+                pq_info.append(f"查询类型: {parsed_query['query_type']}")
+            if parsed_query.get("object_type"):
+                pq_info.append(f"查询对象: {parsed_query['object_type']}")
+            if parsed_query.get("object_identifier"):
+                pq_info.append(f"对象标识: {parsed_query['object_identifier']}")
+            if parsed_query.get("metric"):
+                pq_info.append(f"查询指标: {parsed_query['metric']}")
+            if parsed_query.get("time_range"):
+                pq_info.append(f"时间范围: {parsed_query['time_range']}")
+            if pq_info:
+                context_parts.append("问题结构化理解：\n" + "\n".join(pq_info))
+        
         if messages:
-            # 2.1 提取结构化上下文（设备/客户信息）
+            # 2.2 提取结构化上下文（设备/客户信息）
             extracted = extract_context_from_messages(messages, max_history=3)
             if extracted:
                 context_parts.append("参考信息：\n" + format_extracted_context(extracted))
             
-            # 2.2 保留最近的问题（不含 AI 回复的 JSON）
+            # 2.3 保留最近的问题（不含 AI 回复的 JSON）
             recent_questions = [
                 msg.content for msg in messages[-4:]
                 if msg.type == "human"
@@ -326,14 +580,45 @@ def sql_gen_node(state: Text2SQLState, config: RunnableConfig) -> Command:
     # 获取上下文：优先使用 current_context（当前步骤的结果），否则从 messages 历史提取
     from utils.context_utils import extract_context_from_messages, format_extracted_context
     
-    context = state.get("current_context", "")
+    context_parts = []
     
-    # 如果没有当前上下文，从历史消息中提取
-    if not context and state.get("messages"):
+    # 1. 主 Agent 传入的预解析参数（优先级最高）
+    serial = state.get("serial")
+    client_id = state.get("client_id")
+    if serial or client_id:
+        entity_info = []
+        if serial:
+            entity_info.append(f"设备序列号: {serial}")
+        if client_id:
+            entity_info.append(f"客户ID: {client_id}")
+        context_parts.append("已知当前查询涉及到的客户id(client_id)/设备序列号(serial)：\n" + "\n".join(entity_info))
+    
+    # 1.5 结构化问题理解（来自 query_parser）
+    parsed_query = state.get("parsed_query")
+    if parsed_query:
+        pq_info = []
+        if parsed_query.get("object_identifier"):
+            pq_info.append(f"查询对象: {parsed_query['object_identifier']}")
+        if parsed_query.get("metric"):
+            pq_info.append(f"查询指标: {parsed_query['metric']}")
+        if parsed_query.get("time_range"):
+            pq_info.append(f"时间范围: {parsed_query['time_range']}")
+        if pq_info:
+            context_parts.append("问题结构化理解：\n" + "\n".join(pq_info))
+    
+    # 2. 当前步骤的上下文
+    current_context = state.get("current_context", "")
+    if current_context:
+        context_parts.append(f"当前步骤上下文：\n{current_context}")
+    
+    # 3. 从历史消息中提取
+    if not current_context and state.get("messages"):
         extracted = extract_context_from_messages(state["messages"])
         if extracted:
-            context = f"历史对话上下文：\n{format_extracted_context(extracted)}"
+            context_parts.append(f"历史对话上下文：\n{format_extracted_context(extracted)}")
             logger.debug(f"从历史消息提取上下文: {extracted}")
+    
+    context = "\n\n".join(context_parts) if context_parts else "无"
     
     # 获取 SQLGenerator 单例
     generator = get_sql_generator()
@@ -344,7 +629,7 @@ def sql_gen_node(state: Text2SQLState, config: RunnableConfig) -> Command:
         purpose=step["purpose"],
         database_type=step["database"],
         schema=state["current_schema"],
-        context=context if context else "无"
+        context=context
     )
     
     total_time = time.time() - total_start
@@ -522,7 +807,7 @@ def aggregate_node(state: Text2SQLState, config: RunnableConfig) -> Command:
     else:
         final_results = []
     
-    # 🆕 使用 LangChain Message 格式保存对话历史
+    # 使用 LangChain Message 格式保存对话历史
     from langchain_core.messages import HumanMessage, AIMessage
     import json
     
@@ -531,26 +816,28 @@ def aggregate_node(state: Text2SQLState, config: RunnableConfig) -> Command:
     # 添加用户原始问题
     new_messages.append(HumanMessage(content=state["question"]))
     
-    # 构建精简的 AI 回复（只保留后续对话需要的关键信息）
-    from utils.context_utils import extract_key_fields
+    # 构建精简的 AI 回复
+    # 收集所有步骤的 SQL 语句
+    sql_queries = []
+    for step_result in state.get("step_results", []):
+        db = step_result.get("database", "unknown")
+        query = step_result.get("query", "")
+        if query:
+            sql_queries.append(f"[{db}] {query}")
+    
+    # 生成查询结果摘要
+    result_summary = _generate_result_summary(final_results)
     
     ai_response = {
         "question": state.get("question"),  # 原始问题（用于上下文理解）
-        "databases_used": list(set(s.get("database") for s in state.get("step_results", []))),
-        "result_count": len(final_results),
-        "result_sample": extract_key_fields(final_results, max_rows=5)  # 精简的关键字段
+        "sql_queries": sql_queries,  # 生成的 SQL 语句
+        "result_summary": result_summary,  # 查询结果摘要
     }
     new_messages.append(AIMessage(content=json.dumps(ai_response, ensure_ascii=False, default=str)))
     
     # 判断是否有结果
     has_results = len(final_results) > 0
     status = "success" if has_results else "no_result"
-    
-    updates = {
-        "status": status,
-        "final_results": f"<{len(final_results)} 条结果>",
-        "messages": new_messages  # 追加到历史（使用 add_messages reducer）
-    }
     
     return Command(update={
         "status": status,

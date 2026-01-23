@@ -89,6 +89,11 @@ INFLUXQL_GENERATION_PROMPT = """你是一个InfluxQL专家。根据用户问题�
 2. **不支持子查询**：不能使用 `IN (SELECT ...)` 或嵌套 SELECT
 3. **不支持 OR 连接 tag 条件**：tag 过滤只能用 AND 连接，但字段(field)条件可以用 OR
 4. **只输出一条查询语句**：不要输出多条语句或额外文本
+5. **聚合函数只能作用于 field**：不能对 tag 使用 MEAN()、SUM()、MAX() 等聚合函数，tag 只能用于过滤和 GROUP BY
+6. **SELECT * 不能与 GROUP BY time() 一起使用**：使用聚合时必须明确指定要聚合的 field，如 `SELECT MEAN("cpu_usage")`
+7. **🔴 多值 tag 过滤必须使用 GROUP BY**：当 WHERE 中的某个 tag 使用正则 `=~` 匹配多个值时（如 `iface =~ /^(wan0|wan1)$/`），**必须**在查询末尾添加 `GROUP BY "该tag名"`，否则返回结果无法区分数据属于哪个值！
+   - ❌ 错误示例: `SELECT "field" FROM "m" WHERE "iface" =~ /^(wan0|wan1)$/`
+   - ✅ 正确示例: `SELECT "field" FROM "m" WHERE "iface" =~ /^(wan0|wan1)$/ GROUP BY "iface"`
 
 ## InfluxQL 语法规则
 1. **时间过滤**：
@@ -96,16 +101,23 @@ INFLUXQL_GENERATION_PROMPT = """你是一个InfluxQL专家。根据用户问题�
    - 绝对时间：`WHERE time >= '2024-01-14T00:00:00Z'`
 2. **引用规则**：
    - 字符串值用单引号：`'abc123'`
-   - measurement名、tag名、field名用双引号：`"cpu_usage"`、`"serial"`
-3. **聚合函数**：支持 `MEAN()`、`MAX()`、`MIN()`、`SUM()`、`COUNT()` 等
-4. **GROUP BY**：支持按时间间隔分组，如 `GROUP BY time(5m)`
+   - measurement名、tag名、field名可用双引号包裹（包含特殊字符、空格或为保留字时必须使用双引号）
+   - 示例：`SELECT "cpu_usage" FROM "system_metrics" WHERE "serial" = 'abc123'`
+3. **聚合函数**：支持 `MEAN()`、`MAX()`、`MIN()`、`SUM()`、`COUNT()` 等，参数必须是 field 名称
+4. **GROUP BY 用法**：
+   - 按时间分组：`GROUP BY time(5m)`
+   - 同时按时间和 tag 分组：`GROUP BY time(5m), "tag_name"`
+   - 注意：GROUP BY 中只能使用 tag，不能使用 field
+5. **fill() 函数**：`fill(none)`、`fill(0)`、`fill(previous)` 等必须与 `GROUP BY time()` 一起使用
 
 ## 重要注意事项
 1. **区分 tag 和 field**：
-   - tag：用于过滤和分组，支持 `=`、`!=` 操作
-   - field：存储数值，支持 `>`、`<`、`>=`、`<=`、`=`、`!=` 操作
+   - tag：索引列，用于过滤和分组，只支持字符串类型，支持 `=`、`!=`、`=~`（正则）操作
+   - field：数据列，存储实际数值，支持 `>`、`<`、`>=`、`<=`、`=`、`!=` 操作
+   - 聚合函数（MEAN/SUM/MAX/MIN/COUNT）只能用于 field
 2. **默认时间顺序**：InfluxDB 默认按时间升序返回（从旧到新）
-3. **空值处理**：使用 `fill(none)` 来排除没有值的间隔
+3. **空值处理**：使用 `fill(none)` 来排除没有值的间隔，但必须配合 GROUP BY time() 使用
+4. **WHERE 子句顺序**：建议将时间条件放在 WHERE 子句最后，以优化查询性能
 
 ## Measurement Schema
 {schema}
@@ -119,7 +131,7 @@ INFLUXQL_GENERATION_PROMPT = """你是一个InfluxQL专家。根据用户问题�
 ## 查询目的
 {purpose}
 
-## 上下文信息（来自之前步骤的结果）
+## 上下文信息
 {context}
 
 ## 输出要求

@@ -60,6 +60,50 @@ class InfluxDBConnector:
             self._client.close()
             self._client = None
     
+    def _convert_utc_to_local(self, results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """
+        将结果中的 UTC 时间转换为本地时间 (UTC+8)。
+        
+        Args:
+            results: 包含查询结果的字典列表
+            
+        Returns:
+            时间已转换为本地时间的结果列表
+        """
+        from datetime import datetime, timezone, timedelta
+        
+        # 中国时区 (UTC+8)
+        local_tz = timezone(timedelta(hours=8))
+        
+        for row in results:
+            if 'time' in row and row['time']:
+                try:
+                    time_str = row['time']
+                    # InfluxDB 返回的时间格式通常是 ISO 8601 格式
+                    # 例如: "2026-01-21T03:44:30Z" 或 "2026-01-21T03:44:30.123456Z"
+                    if isinstance(time_str, str):
+                        # 移除末尾的 Z 并解析
+                        if time_str.endswith('Z'):
+                            time_str = time_str[:-1] + '+00:00'
+                        
+                        # 尝试解析带微秒的格式
+                        try:
+                            utc_time = datetime.fromisoformat(time_str)
+                        except ValueError:
+                            # 尝试其他常见格式
+                            utc_time = datetime.strptime(time_str.replace('+00:00', ''), '%Y-%m-%dT%H:%M:%S.%f')
+                            utc_time = utc_time.replace(tzinfo=timezone.utc)
+                        
+                        # 转换为本地时间
+                        local_time = utc_time.astimezone(local_tz)
+                        # 格式化为易读的本地时间字符串
+                        row['time'] = local_time.strftime('%Y-%m-%d %H:%M:%S')
+                except Exception:
+                    # 如果转换失败，保持原值
+                    pass
+        
+        return results
+    
     def execute(self, query: str) -> list[dict[str, Any]]:
         """
         执行InfluxQL查询并返回结果。
@@ -83,14 +127,31 @@ class InfluxDBConnector:
             if result is None:
                 return []
             
-            # 如果是 ResultSet 对象
-            if hasattr(result, 'get_points'):
+            # 如果是 ResultSet 对象，使用 items() 获取带 tag 信息的结果
+            if hasattr(result, 'items'):
+                # items() 返回 (measurement, tags_dict, points_generator)
+                for (measurement, tags), points in result.items():
+                    for point in points:
+                        row = dict(point)
+                        # 将 GROUP BY 的 tag 值合并到每行数据中
+                        if tags:
+                            row.update(tags)
+                        results.append(row)
+            # 如果有 get_points 但没有 items（旧版本兼容）
+            elif hasattr(result, 'get_points'):
                 for series in result.get_points():
                     results.append(dict(series))
             # 如果是列表（多个查询结果）
             elif isinstance(result, list):
                 for item in result:
-                    if hasattr(item, 'get_points'):
+                    if hasattr(item, 'items'):
+                        for (measurement, tags), points in item.items():
+                            for point in points:
+                                row = dict(point)
+                                if tags:
+                                    row.update(tags)
+                                results.append(row)
+                    elif hasattr(item, 'get_points'):
                         for series in item.get_points():
                             results.append(dict(series))
                     elif isinstance(item, dict):
@@ -100,6 +161,9 @@ class InfluxDBConnector:
                 results.append(result)
             else:
                 raise RuntimeError(f"未知的返回类型: {type(result)}, 值: {str(result)[:200]}")
+            
+            # 将 UTC 时间转换为本地时间 (UTC+8)
+            results = self._convert_utc_to_local(results)
             
             return results
         except RuntimeError:
